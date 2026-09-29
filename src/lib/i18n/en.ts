@@ -473,6 +473,16 @@ export const en = {
   'problem.copy': 'Copy command',
   'problem.copied': 'Command copied',
   'problem.fixed': '{provider} is ready',
+  'graph.title': 'Connections',
+  'graph.hint': 'Drag to move · Ctrl+scroll to zoom',
+  'graph.label': 'Case connections graph. Arrow keys pan, plus and minus zoom, 0 fits.',
+  'graph.empty': 'Nothing connected to this case yet',
+  'graph.zoomIn': 'Zoom in',
+  'graph.zoomOut': 'Zoom out',
+  'graph.fit': 'Fit to view',
+  'undo.rollback': 'Rollback',
+  'undo.restored': 'Restored',
+  'chat.deleted': 'Conversation deleted',
   // @@end
 } as const;
 

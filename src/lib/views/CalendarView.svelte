@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { deleteWithUndo } from '$lib/undoDelete';
   import { confirmDelete } from '$lib/confirm.svelte';
   import { eventTarget, openArtifactMenu } from '$lib/artifactMenu';
   import { intlLocale, label, t } from '$lib/i18n/index.svelte';
@@ -213,12 +214,16 @@
   async function remove(id: string): Promise<void> {
     const name = editing?.title || t('kind.event');
     if (!(await confirmDelete({ title: t('confirm.event.title'), message: t('confirm.event.body', { name }) }))) return;
-    const ok = await guard(t('cal.err.delete'), () => api.deleteEvent(id));
-    if (ok !== null) {
-      editing = null;
-      await load();
-      await refreshTree();
-    }
+    editing = null;
+    await deleteWithUndo({
+      key: `event:${id}`,
+      message: t('cal.deleted'),
+      commit: async () => (await guard(t('cal.err.delete'), () => api.deleteEvent(id))) !== null,
+      after: async () => {
+        await load();
+        await refreshTree();
+      },
+    });
   }
 
   function time(e: CalendarEvent): string {
@@ -280,6 +285,7 @@
                   <span
                     oncontextmenu={(ev) => openArtifactMenu(ev, eventTarget(e))}
                     class="pill tint"
+                    data-artifact={`event:${e.id}`}
                     style={`--c:${e.color ?? KIND_COLOR[e.kind] ?? KIND_COLOR.Other}`}
                     title={`${e.title} · ${time(e)}`}
                   >
@@ -306,7 +312,7 @@
           {/if}
           {#each dayEvents as e (e.id)}
             {@const c = e.color ?? KIND_COLOR[e.kind] ?? KIND_COLOR.Other}
-            <button class="ag-item" style={`--c:${c}`} onclick={() => edit(e)} oncontextmenu={(ev) => openArtifactMenu(ev, eventTarget(e))}>
+            <button class="ag-item" data-artifact={`event:${e.id}`} style={`--c:${c}`} onclick={() => edit(e)} oncontextmenu={(ev) => openArtifactMenu(ev, eventTarget(e))}>
               <span class="ag-bar"></span>
               <span class="ag-body">
                 <span class="ag-title">{e.title}</span>
@@ -324,7 +330,7 @@
           <div class="eyebrow ag-sub">{t('cal.nextUp')}</div>
           <div class="ag-list sub">
             {#each upcoming.slice(0, 8) as e (e.id)}
-              <button class="ag-item" onclick={() => edit(e)} oncontextmenu={(ev) => openArtifactMenu(ev, eventTarget(e))}>
+              <button class="ag-item" data-artifact={`event:${e.id}`} onclick={() => edit(e)} oncontextmenu={(ev) => openArtifactMenu(ev, eventTarget(e))}>
                 <span class="ag-bar" style={`--c:${e.color ?? KIND_COLOR[e.kind] ?? KIND_COLOR.Other}`}></span>
                 <span class="ag-body">
                   <span class="ag-title tiny">{e.title}</span>
@@ -349,7 +355,7 @@
           {#each upcoming as e (e.id)}
             {@const c = e.color ?? KIND_COLOR[e.kind] ?? KIND_COLOR.Other}
             <!-- svelte-ignore a11y_no_static_element_interactions -->
-            <div class="row-item" style={`--c:${c}`} oncontextmenu={(ev) => openArtifactMenu(ev, eventTarget(e))}>
+            <div class="row-item" data-artifact={`event:${e.id}`} style={`--c:${c}`} oncontextmenu={(ev) => openArtifactMenu(ev, eventTarget(e))}>
               <span class="ag-bar"></span>
               <div class="r-when">
                 <span class="r-date">{new Date(e.startsAt).toLocaleDateString(intlLocale(), { month: 'short', day: 'numeric' })}</span>

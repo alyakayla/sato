@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 
 use rusqlite::{params, Connection};
@@ -118,6 +119,7 @@ pub async fn get_settings(state: State<'_, AppState>) -> CmdResult<Settings> {
 
 #[tauri::command]
 pub async fn save_provider(
+    app: AppHandle,
     state: State<'_, AppState>,
     config: ProviderConfig,
 ) -> CmdResult<ProviderStatus> {
@@ -126,7 +128,76 @@ pub async fn save_provider(
     let client = Provider::new(config.clone())?;
     let diagnosis = client.diagnose().await;
     state.set_provider(client);
+    // A different embedding model means every stored vector is now foreign.
+    ensure_embedding_format(&app);
     provider_status(&state, &config, diagnosis)
+}
+
+/// Records how the stored vectors were produced (see `embedtext::format_id`).
+const EMBEDDING_FORMAT_KEY: &str = "embeddingFormat";
+
+static REEMBEDDING: AtomicBool = AtomicBool::new(false);
+
+/// Re-embeds every indexed document, in the background and one at a time,
+/// when the embedding model or recipe has changed since they were embedded —
+/// otherwise questions are embedded one way and passages another, and
+/// retrieval quietly degrades.
+///
+/// Waits until the provider is usable: failing every document because Ollama
+/// is not running would mark them all Failed and discard good vectors. A
+/// document that still fails mid-way is put back to Ready with its old vectors
+/// intact, and the format is left unrecorded so the next launch tries again.
+pub fn ensure_embedding_format(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    let current = crate::embedtext::format_id(&state.provider().config().embedding_model);
+    let stored = db::get_setting(&state.db(), EMBEDDING_FORMAT_KEY).ok().flatten();
+    if stored.as_deref() == Some(current.as_str()) {
+        return;
+    }
+    let ready: Vec<String> = {
+        let conn = state.db();
+        let mut stmt = match conn.prepare("SELECT id FROM documents WHERE index_status = 'Ready'") {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+        let rows = stmt.query_map([], |r| r.get::<_, String>(0));
+        match rows {
+            Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
+            Err(_) => return,
+        }
+    };
+    if ready.is_empty() {
+        // Nothing embedded yet: whatever is indexed next uses the current format.
+        let _ = db::set_setting(&state.db(), EMBEDDING_FORMAT_KEY, &current);
+        return;
+    }
+    if REEMBEDDING.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    let app = app.clone();
+    let lock = state.index_lock();
+    tauri::async_runtime::spawn(async move {
+        let provider = app.state::<AppState>().provider();
+        if provider.diagnose().await.ok {
+            let mut all_ok = true;
+            for id in &ready {
+                let _guard = lock.lock().await;
+                if index_document(&app, id).await.is_err() {
+                    all_ok = false;
+                    // The old vectors are still in the store; keep serving them.
+                    let _ = app.state::<AppState>().db().execute(
+                        "UPDATE documents SET index_status = 'Ready', index_error = NULL WHERE id = ?1",
+                        [id],
+                    );
+                }
+            }
+            if all_ok {
+                let _ = db::set_setting(&app.state::<AppState>().db(), EMBEDDING_FORMAT_KEY, &current);
+            }
+            let _ = app.emit("documents:changed", serde_json::json!({}));
+        }
+        REEMBEDDING.store(false, Ordering::Release);
+    });
 }
 
 fn provider_status(
@@ -993,8 +1064,8 @@ pub async fn index_document(app: &AppHandle, document_id: &str) -> Result<()> {
         ));
     }
 
+    let chunks = chunk::chunk_extracted(&extracted, document_id);
     let pages: Vec<String> = extracted.pages.unwrap_or_default();
-    let chunks = chunk::chunk_text(&pages, document_id);
     if chunks.is_empty() {
         return Err(Error::Message("Document produced no indexable chunks".into()));
     }
@@ -1006,8 +1077,15 @@ pub async fn index_document(app: &AppHandle, document_id: &str) -> Result<()> {
     emit_progress(app, &doc, "Embedding", 0, chunks.len() as i64);
     let mut vectors: Vec<Vec<f32>> = Vec::with_capacity(chunks.len());
     let batch_size = 24usize;
+    let model = provider.config().embedding_model.clone();
     for (batch_idx, batch) in chunks.chunks(batch_size).enumerate() {
-        let inputs: Vec<String> = batch.iter().map(|c| c.text.clone()).collect();
+        // What is embedded carries the model's task prefix and the passage's
+        // context (case, file, page); what is stored and cited stays the bare
+        // passage. See embedtext.rs.
+        let inputs: Vec<String> = batch
+            .iter()
+            .map(|c| crate::embedtext::document_input(&model, c, doc.case_reference.as_deref(), &doc.file_name))
+            .collect();
         let embedded = provider.embed(&inputs).await?;
         if let Some(first) = embedded.first() {
             let dim = first.len() as i64;
@@ -1319,7 +1397,8 @@ pub async fn send_message(
     // Without an embedding the question can still be answered from keyword
     // matches, so a failure here degrades retrieval instead of ending the
     // turn. The panel is told why, so it can say so.
-    let query_vector = match provider.embed(&[content.clone()]).await {
+    let query_input = crate::embedtext::query_input(&provider.config().embedding_model, &content);
+    let query_vector = match provider.embed(&[query_input]).await {
         Ok(v) => v.into_iter().next().unwrap_or_default(),
         Err(e) => {
             let problem = crate::providers::classify(&e);
@@ -2313,6 +2392,7 @@ pub fn init(app: &AppHandle) -> Result<()> {
         data_dir,
         index_lock: Arc::new(tokio::sync::Mutex::new(())),
     });
+    ensure_embedding_format(app);
     Ok(())
 }
 

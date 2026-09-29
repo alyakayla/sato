@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { deleteWithUndo } from '$lib/undoDelete';
   import { t } from '$lib/i18n/index.svelte';
   import { onMount } from 'svelte';
   import { listen } from '@tauri-apps/api/event';
@@ -170,15 +171,18 @@
   }
 
   async function removeConversation(id: string): Promise<void> {
-    const ok = await guard(t('chat.err.delete'), () =>
-      api.deleteConversation(id),
-    );
-    if (ok === null) return;
-    conversations = conversations.filter((c) => c.id !== id);
-    if (activeId === id) {
-      activeId = null;
-      await loadConversations();
-    }
+    await deleteWithUndo({
+      key: `conversation:${id}`,
+      message: t('chat.deleted'),
+      commit: async () => (await guard(t('chat.err.delete'), () => api.deleteConversation(id))) !== null,
+      after: async () => {
+        conversations = conversations.filter((c) => c.id !== id);
+        if (activeId === id) {
+          activeId = null;
+          await loadConversations();
+        }
+      },
+    });
   }
 
   // Conversations load from the case-scope effect below, which also runs on
@@ -258,7 +262,7 @@
         <div class="faint pad">{t('chat.noConversations')}</div>
       {/if}
       {#each conversations as c (c.id)}
-        <div class="conv" class:active={c.id === activeId}>
+        <div class="conv" data-artifact={`conversation:${c.id}`} class:active={c.id === activeId}>
           <button class="conv-main" onclick={() => void select(c.id)}>
             <span class="truncate">{c.title}</span>
             <span class="faint tiny">{t('chat.msgCount', { n: c.messageCount })}</span>

@@ -249,6 +249,7 @@
           {@const hasKids = parents.has(node.id)}
           <div
             class="row"
+            data-artifact={node.id}
             class:sel={selected === node.id}
             class:case-row={node.kind === 'case'}
             role="treeitem"

@@ -1171,6 +1171,56 @@ dialog[open]::backdrop {
   }
 }
 
+/* Pop! (lib/pop.ts): a ring and a spray of dots where a deleted item was.
+   Ink, like every non-data mark; it plays once and removes itself. */
+.pop-burst {
+  position: fixed;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  z-index: 70;
+}
+.pop-ring {
+  position: absolute;
+  left: calc(var(--pop-size) / -2);
+  top: calc(var(--pop-size) / -2);
+  width: var(--pop-size);
+  height: var(--pop-size);
+  border: 2px solid var(--ink);
+  border-radius: var(--radius-full);
+  animation: pop-ring 720ms var(--ease) forwards;
+}
+.pop-dot {
+  position: absolute;
+  left: -2.5px;
+  top: -2.5px;
+  width: 5px;
+  height: 5px;
+  border-radius: var(--radius-full);
+  background: var(--ink);
+  animation: pop-dot 720ms var(--ease) forwards;
+}
+@keyframes pop-ring {
+  from {
+    transform: scale(0.2);
+    opacity: 0.9;
+  }
+  to {
+    transform: scale(1);
+    opacity: 0;
+  }
+}
+@keyframes pop-dot {
+  from {
+    transform: rotate(var(--pop-angle)) translateX(0) scale(1);
+    opacity: 1;
+  }
+  to {
+    transform: rotate(var(--pop-angle)) translateX(calc(var(--pop-size) * 0.75)) scale(0.3);
+    opacity: 0;
+  }
+}
+
 /* Every button eases its hover colours, at zero specificity so any
    component's own transition list still wins. */
 :where(button) {

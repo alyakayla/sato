@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { deleteWithUndo } from '$lib/undoDelete';
   import { confirmDelete } from '$lib/confirm.svelte';
   import { openArtifactMenu, personTarget } from '$lib/artifactMenu';
   import { label, t } from '$lib/i18n/index.svelte';
@@ -134,12 +135,15 @@
 
   async function remove(p: Person) {
     if (!(await confirmDelete({ title: t('confirm.person.title'), message: t('confirm.person.body', { name: p.fullName }) }))) return;
-    const ok = await guard(t('people.err.delete'), () => api.deletePerson(p.id));
-    if (ok !== null) {
-      await refreshPeople();
-      await refreshCases();
-      notify('ok', t('people.deleted'));
-    }
+    await deleteWithUndo({
+      key: `person:${p.id}`,
+      message: t('people.deleted'),
+      commit: async () => (await guard(t('people.err.delete'), () => api.deletePerson(p.id))) !== null,
+      after: async () => {
+        await refreshPeople();
+        await refreshCases();
+      },
+    });
   }
 
   async function link() {
@@ -158,11 +162,16 @@
 
   async function unlink(p: Person) {
     if (!activeCaseId.value) return;
-    const ok = await guard(t('people.err.unlink'), () => api.unlinkPerson(activeCaseId.value!, p.id));
-    if (ok !== null) {
-      roster = roster.filter((r) => r.person.id !== p.id);
-      await refreshCases();
-    }
+    const caseId = activeCaseId.value;
+    await deleteWithUndo({
+      key: `person:${p.id}:${caseId}`,
+      message: t('menu.removed'),
+      commit: async () => (await guard(t('people.err.unlink'), () => api.unlinkPerson(caseId, p.id))) !== null,
+      after: async () => {
+        roster = roster.filter((r) => r.person.id !== p.id);
+        await refreshCases();
+      },
+    });
   }
 </script>
 
@@ -204,7 +213,7 @@
             </thead>
             <tbody>
               {#each filtered as p (p.id)}
-                <tr ondblclick={() => openEdit(p)} oncontextmenu={(e) => openArtifactMenu(e, personTarget(p, null))}>
+                <tr data-artifact={`person:${p.id}`} ondblclick={() => openEdit(p)} oncontextmenu={(e) => openArtifactMenu(e, personTarget(p, null))}>
                   <td>{p.fullName}</td>
                   <td><span class="badge badge-muted">{label(p.role)}</span></td>
                   <td class="truncate muted" style="max-width:180px">{p.organization ?? '—'}</td>
@@ -261,6 +270,7 @@
               <!-- svelte-ignore a11y_no_static_element_interactions -->
               <div
                 class="roster-row"
+                data-artifact={`person:${entry.person.id}:${activeCaseId.value}`}
                 oncontextmenu={(e) => openArtifactMenu(e, personTarget(entry.person, activeCaseId.value))}
               >
                 <div class="grow">

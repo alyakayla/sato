@@ -129,7 +129,7 @@
     {:else}
       {#each hits as hit (hit.chunk.id)}
         {@const parts = highlight(snippet(hit.chunk.text))}
-        <article class="hit">
+        <article class="hit" data-artifact={`document:${hit.chunk.documentId}`}>
           <header>
             <button
               class="doc"

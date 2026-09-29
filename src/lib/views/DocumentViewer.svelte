@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { deleteWithUndo } from '$lib/undoDelete';
   import { confirmDelete } from '$lib/confirm.svelte';
   import { intlLocale, t } from '$lib/i18n/index.svelte';
   import { convertFileSrc } from '@tauri-apps/api/core';
@@ -77,12 +78,14 @@
   async function remove(): Promise<void> {
     if (!doc) return;
     if (!(await confirmDelete({ title: t('confirm.document.title'), message: t('confirm.document.body', { name: doc.fileName }) }))) return;
-    const ok = await guard(t('doc.err.delete'), () => api.deleteDocument(doc!.id));
-    if (ok !== null) {
-      notify('ok', t('doc.deleted'));
-      await refreshTree();
-      openPane({ kind: 'grid' });
-    }
+    const id = doc.id;
+    await deleteWithUndo({
+      key: `document:${id}`,
+      message: t('doc.deleted'),
+      before: () => openPane({ kind: 'grid' }),
+      commit: async () => (await guard(t('doc.err.delete'), () => api.deleteDocument(id))) !== null,
+      after: () => refreshTree(),
+    });
   }
 
   function openFileExternally(): void {

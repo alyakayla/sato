@@ -7,6 +7,7 @@ import { api } from './api';
 import { t } from './i18n/index.svelte';
 import { openContextMenu, type MenuEntry } from './contextMenu.svelte';
 import { confirmDelete } from './confirm.svelte';
+import { deleteWithUndo } from './undoDelete';
 import {
   artifactsChanged,
   askAbout,
@@ -40,13 +41,31 @@ function isShowing(target: ArtifactTarget): boolean {
   );
 }
 
-/** After a delete: refresh shared data, tell local views, and leave a dead page. */
-async function afterDelete(target: ArtifactTarget, message: string): Promise<void> {
-  notify('ok', message);
-  if (isShowing(target)) openPane({ kind: 'grid' });
-  await refreshAll();
-  if (target.kind === 'person') await refreshPeople();
-  artifactsChanged();
+/**
+ * Deletes with a rollback window (lib/undoDelete.ts): it pops and hides now,
+ * the real delete runs when the toast's time is up, and "→ Rollback" cancels.
+ */
+function removeWithUndo(
+  target: ArtifactTarget,
+  message: string,
+  errorLabel: string,
+  call: () => Promise<unknown>,
+  key = `${target.kind}:${target.id}`,
+): Promise<void> {
+  return deleteWithUndo({
+    key,
+    message,
+    // Leave the item's own page right away; it is gone from here on.
+    before: () => {
+      if (isShowing(target)) openPane({ kind: 'grid' });
+    },
+    commit: async () => (await guard(errorLabel, call)) !== null,
+    after: async () => {
+      await refreshAll();
+      if (target.kind === 'person') await refreshPeople();
+      artifactsChanged();
+    },
+  });
 }
 
 function ask(nodeKey: string): void {
@@ -165,8 +184,7 @@ export function artifactMenu(target: ArtifactTarget): MenuEntry[] {
         danger: true,
         run: async () => {
           if (!(await confirmDelete({ title: t('confirm.case.title'), message: t('confirm.case.body', { name: target.label }) }))) return;
-          const ok = await guard(t('case.err.delete'), () => api.deleteCase(target.id));
-          if (ok !== null) await afterDelete(target, t('case.deleted'));
+          await removeWithUndo(target, t('case.deleted'), t('case.err.delete'), () => api.deleteCase(target.id));
         },
       });
       break;
@@ -178,8 +196,7 @@ export function artifactMenu(target: ArtifactTarget): MenuEntry[] {
         danger: true,
         run: async () => {
           if (!(await confirmDelete({ title: t('confirm.document.title'), message: t('confirm.document.body', { name: target.label }) }))) return;
-          const ok = await guard(t('doc.err.delete'), () => api.deleteDocument(target.id));
-          if (ok !== null) await afterDelete(target, t('doc.deleted'));
+          await removeWithUndo(target, t('doc.deleted'), t('doc.err.delete'), () => api.deleteDocument(target.id));
         },
       });
       break;
@@ -191,8 +208,7 @@ export function artifactMenu(target: ArtifactTarget): MenuEntry[] {
         danger: true,
         run: async () => {
           if (!(await confirmDelete({ title: t('confirm.sheet.title'), message: t('confirm.sheet.body', { name: target.label }) }))) return;
-          const ok = await guard(t('sheet.err.delete'), () => api.deleteSpreadsheet(target.id));
-          if (ok !== null) await afterDelete(target, t('sheet.deleted'));
+          await removeWithUndo(target, t('sheet.deleted'), t('sheet.err.delete'), () => api.deleteSpreadsheet(target.id));
         },
       });
       break;
@@ -204,8 +220,13 @@ export function artifactMenu(target: ArtifactTarget): MenuEntry[] {
           glyph: '−',
           label: t('menu.removeFromCase'),
           run: async () => {
-            const ok = await guard(t('people.err.unlink'), () => api.unlinkPerson(caseId, target.id));
-            if (ok !== null) await afterDelete(target, t('menu.removed'));
+            await removeWithUndo(
+              target,
+              t('menu.removed'),
+              t('people.err.unlink'),
+              () => api.unlinkPerson(caseId, target.id),
+              `person:${target.id}:${caseId}`,
+            );
           },
         });
       }
@@ -216,8 +237,7 @@ export function artifactMenu(target: ArtifactTarget): MenuEntry[] {
         danger: true,
         run: async () => {
           if (!(await confirmDelete({ title: t('confirm.person.title'), message: t('confirm.person.body', { name: target.label }) }))) return;
-          const ok = await guard(t('people.err.delete'), () => api.deletePerson(target.id));
-          if (ok !== null) await afterDelete(target, t('people.deleted'));
+          await removeWithUndo(target, t('people.deleted'), t('people.err.delete'), () => api.deletePerson(target.id));
         },
       });
       break;
@@ -230,8 +250,7 @@ export function artifactMenu(target: ArtifactTarget): MenuEntry[] {
         danger: true,
         run: async () => {
           if (!(await confirmDelete({ title: t('confirm.event.title'), message: t('confirm.event.body', { name: target.label }) }))) return;
-          const ok = await guard(t('cal.err.delete'), () => api.deleteEvent(target.id));
-          if (ok !== null) await afterDelete(target, t('cal.deleted'));
+          await removeWithUndo(target, t('cal.deleted'), t('cal.err.delete'), () => api.deleteEvent(target.id));
         },
       });
       break;

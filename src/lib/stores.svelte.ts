@@ -81,7 +81,12 @@ export const people = new Store<Person[]>([]);
 export const activeCaseId = new Store<string | null>(null);
 
 export const indexing = new Store<Record<string, IndexProgress>>({});
-export const toast = new Store<{ kind: 'ok' | 'danger' | 'warn'; text: string } | null>(null);
+export interface ToastAction {
+  label: string;
+  run: () => void;
+}
+
+export const toast = new Store<{ kind: 'ok' | 'danger' | 'warn'; text: string; action?: ToastAction } | null>(null);
 
 // --- Workspace -------------------------------------------------------------
 
@@ -281,10 +286,20 @@ export function expandTo(nodeId: string, nodes: TreeNode[]): void {
 
 let toastTimer: ReturnType<typeof setTimeout> | undefined;
 
-export function notify(kind: 'ok' | 'danger' | 'warn', text: string): void {
-  toast.set({ kind, text });
+export function notify(
+  kind: 'ok' | 'danger' | 'warn',
+  text: string,
+  opts: { action?: ToastAction; ms?: number } = {},
+): void {
+  toast.set({ kind, text, action: opts.action });
   if (toastTimer) clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => toast.set(null), kind === 'danger' ? 6000 : 3200);
+  toastTimer = setTimeout(() => toast.set(null), opts.ms ?? (kind === 'danger' ? 6000 : 3200));
+}
+
+/** Dismisses the toast now — used once its action has been taken. */
+export function dismissToast(): void {
+  if (toastTimer) clearTimeout(toastTimer);
+  toast.set(null);
 }
 
 /** Wraps an async call, surfacing failures as a toast instead of a rejection. */

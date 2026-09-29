@@ -7,6 +7,9 @@
   import { formatRelative } from '$lib/api';
   import { KIND_META } from '$lib/tree';
   import { citationCounts } from '$lib/steps';
+  // The app icon, straight from the Tauri icon set, so `tauri icon` updates
+  // the chat and the desktop icon together.
+  import appIcon from '../../../src-tauri/icons/64x64.png';
   import ProviderProblem from '$lib/components/ProviderProblem.svelte';
   import { problemFromReply } from '$lib/providerHealth.svelte';
 
@@ -42,7 +45,7 @@
 <div class="row-msg" class:user={isUser}>
   {#if !isUser}
     <div class="avatar" class:error={!!message.error} title={t('chat.assistant')}>
-      {#if message.error}!{:else}<span class="mark">§</span>{/if}
+      {#if message.error}!{:else}<img class="mark" src={appIcon} alt="" />{/if}
     </div>
   {/if}
 
@@ -69,6 +72,7 @@
               {#if seg.node}
                 <button
                   class="mention"
+                  data-artifact={seg.node.id}
                   class:orphan={!seg.node}
                   title={seg.node ? t('chat.openKind', { kind: t(`kind.${seg.node.kind}`).toLowerCase() }) : t('chat.notFound')}
                   onclick={() => seg.node && openNode(seg.node)}
@@ -97,6 +101,7 @@
         {#each message.citations as c (c.chunkId)}
           <button
             class="cite"
+            data-artifact={`document:${c.documentId}`}
             title={c.snippet}
             onclick={() => openCitation(c.documentId, c.page)}
             oncontextmenu={(e) => openArtifactMenu(e, documentTarget(c.documentId, c.documentName))}
@@ -112,9 +117,6 @@
     {/if}
   </div>
 
-  {#if isUser}
-    <div class="avatar me" title={t('chat.you')}>{t('chat.you')}</div>
-  {/if}
 </div>
 
 <style>
@@ -151,15 +153,16 @@
     color: var(--danger);
     border-color: var(--danger-border);
   }
-  .avatar.me {
-    background: var(--sunken);
-    color: var(--text-secondary);
-    border-color: var(--border);
-    font-size: 8.5px;
+  /* The icon fills the circle; the avatar's own border frames it. */
+  .avatar:has(.mark) {
+    overflow: hidden;
+    background: var(--surface);
   }
   .mark {
-    font-size: 11px;
-    line-height: 1;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
   }
 
   .stack-msg {
@@ -222,8 +225,8 @@
     font: inherit;
     display: inline;
     padding: 0 3px;
-    margin: 0 -1px;
-    border: 1px solid var(--accent-border);
+    margin: 0;
+    border: none;
     border-radius: var(--radius-xs);
     background: var(--accent-soft);
     color: var(--accent);
@@ -235,7 +238,6 @@
   }
   .row-msg.user .body :global(.mention) {
     background: transparent;
-    border-color: currentColor;
     color: inherit;
     text-decoration: underline;
     text-underline-offset: 2px;
@@ -245,7 +247,6 @@
   }
   .body :global(.mention.missing) {
     background: transparent;
-    border-color: var(--border);
     color: var(--text-tertiary);
     text-decoration: line-through;
     cursor: default;

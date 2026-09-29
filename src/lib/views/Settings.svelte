@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { deleteWithUndo } from '$lib/undoDelete';
   import ProviderProblem from '$lib/components/ProviderProblem.svelte';
   import { problemFromStatus, setProviderStatus } from '$lib/providerHealth.svelte';
   import { askBeforeDeleting, confirmDelete, setAskBeforeDeleting } from '$lib/confirm.svelte';
@@ -83,11 +84,12 @@
 
   async function removeCategory(id: string, name: string) {
     if (!(await confirmDelete({ title: t('confirm.category.title'), message: t('confirm.category.body', { name }) }))) return;
-    const ok = await guard(t('settings.err.deleteCategory'), () => api.deleteCategory(id));
-    if (ok !== null) {
-      await refreshCategories();
-      notify('ok', t('settings.categoryDeleted'));
-    }
+    await deleteWithUndo({
+      key: `category:${id}`,
+      message: t('settings.categoryDeleted'),
+      commit: async () => (await guard(t('settings.err.deleteCategory'), () => api.deleteCategory(id))) !== null,
+      after: () => refreshCategories(),
+    });
   }
 </script>
 
@@ -304,7 +306,7 @@
           {:else}
             <div class="cat-list">
               {#each categories.value as c (c.id)}
-                <div class="cat-row">
+                <div class="cat-row" data-artifact={`category:${c.id}`}>
                   <span class="dot" style="background:{c.color}"></span>
                   <div class="grow">
                     <div class="row" style="gap:7px">
