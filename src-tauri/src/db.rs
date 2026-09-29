@@ -279,7 +279,10 @@ mod tests {
             assert!(table_exists(&conn, t), "missing table {t}");
         }
         for t in ["chunks", "embeddings", "chunks_fts"] {
-            assert!(!table_exists(&conn, t), "{t} belongs to the vector database now");
+            assert!(
+                !table_exists(&conn, t),
+                "{t} belongs to the vector database now"
+            );
         }
     }
 
@@ -326,7 +329,8 @@ mod tests {
             [],
         )
         .unwrap();
-        conn.execute("DELETE FROM documents WHERE id = 'd1'", []).unwrap();
+        conn.execute("DELETE FROM documents WHERE id = 'd1'", [])
+            .unwrap();
         let left: Vec<String> = conn
             .prepare("SELECT document_id FROM passages_fts")
             .unwrap()
@@ -361,13 +365,20 @@ mod tests {
         )
         .unwrap();
 
-        conn.execute("DELETE FROM cases WHERE id = 'c1'", []).unwrap();
+        conn.execute("DELETE FROM cases WHERE id = 'c1'", [])
+            .unwrap();
 
         let doc_case: Option<String> = conn
-            .query_row("SELECT case_id FROM documents WHERE id = 'd1'", [], |r| r.get(0))
+            .query_row("SELECT case_id FROM documents WHERE id = 'd1'", [], |r| {
+                r.get(0)
+            })
             .unwrap();
         let sheet_case: Option<String> = conn
-            .query_row("SELECT case_id FROM spreadsheets WHERE id = 's1'", [], |r| r.get(0))
+            .query_row(
+                "SELECT case_id FROM spreadsheets WHERE id = 's1'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert!(doc_case.is_none(), "document should outlive its case");
         assert!(sheet_case.is_none(), "spreadsheet should outlive its case");
@@ -391,7 +402,8 @@ mod tests {
         )
         .unwrap();
 
-        conn.execute("DELETE FROM cases WHERE id = 'c1'", []).unwrap();
+        conn.execute("DELETE FROM cases WHERE id = 'c1'", [])
+            .unwrap();
 
         let n: i64 = conn
             .query_row("SELECT COUNT(*) FROM events", [], |r| r.get(0))

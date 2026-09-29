@@ -97,11 +97,19 @@ impl Provider {
     /// finish.
     pub async fn diagnose(&self) -> Diagnosis {
         let base = self.cfg.base_url.trim_end_matches('/');
-        let wanted = [self.cfg.chat_model.clone(), self.cfg.embedding_model.clone()];
+        let wanted = [
+            self.cfg.chat_model.clone(),
+            self.cfg.embedding_model.clone(),
+        ];
         let timeout = Duration::from_secs(4);
         match self.cfg.kind.as_str() {
             "ollama" => {
-                let resp = self.client.get(format!("{base}/api/tags")).timeout(timeout).send().await;
+                let resp = self
+                    .client
+                    .get(format!("{base}/api/tags"))
+                    .timeout(timeout)
+                    .send()
+                    .await;
                 let resp = match resp.and_then(|r| r.error_for_status()) {
                     Ok(r) => r,
                     Err(e) => return Diagnosis::failed(&Error::Http(e)),
@@ -124,23 +132,50 @@ impl Provider {
             }
             "openai" => {
                 if self.cfg.api_key.is_empty() {
-                    return Diagnosis { ok: false, problem: Some(Problem::Unauthorized), missing_models: vec![], detail: "no API key configured".into() };
+                    return Diagnosis {
+                        ok: false,
+                        problem: Some(Problem::Unauthorized),
+                        missing_models: vec![],
+                        detail: "no API key configured".into(),
+                    };
                 }
-                let resp = self.auth(self.client.get(format!("{base}/models"))).timeout(timeout).send().await;
+                let resp = self
+                    .auth(self.client.get(format!("{base}/models")))
+                    .timeout(timeout)
+                    .send()
+                    .await;
                 let resp = match resp.and_then(|r| r.error_for_status()) {
                     Ok(r) => r,
                     Err(e) => return Diagnosis::failed(&Error::Http(e)),
                 };
                 let ids: Vec<String> = match resp.json::<serde_json::Value>().await {
-                    Ok(v) => v["data"].as_array().into_iter().flatten().filter_map(|m| m["id"].as_str().map(str::to_string)).collect(),
+                    Ok(v) => v["data"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|m| m["id"].as_str().map(str::to_string))
+                        .collect(),
                     Err(e) => return Diagnosis::failed(&Error::Http(e)),
                 };
                 // Some OpenAI-compatible servers do not list models; only
                 // report missing ones when the list is non-empty.
-                let missing = if ids.is_empty() { vec![] } else { wanted.iter().filter(|w| !ids.contains(w)).cloned().collect() };
+                let missing = if ids.is_empty() {
+                    vec![]
+                } else {
+                    wanted
+                        .iter()
+                        .filter(|w| !ids.contains(w))
+                        .cloned()
+                        .collect()
+                };
                 Diagnosis::with_missing(missing)
             }
-            other => Diagnosis { ok: false, problem: Some(Problem::Other), missing_models: vec![], detail: format!("unknown provider '{other}'") },
+            other => Diagnosis {
+                ok: false,
+                problem: Some(Problem::Other),
+                missing_models: vec![],
+                detail: format!("unknown provider '{other}'"),
+            },
         }
     }
 
@@ -193,7 +228,10 @@ impl Provider {
         // OpenAI caps a single embeddings request at 2048 inputs.
         for batch in inputs.chunks(256) {
             let refs: Vec<&str> = batch.iter().map(|s| s.as_str()).collect();
-            let body = OpenAiEmbedRequest { model: &self.cfg.embedding_model, input: refs };
+            let body = OpenAiEmbedRequest {
+                model: &self.cfg.embedding_model,
+                input: refs,
+            };
             let resp: OpenAiEmbedResponse = self
                 .auth(self.client.post(&url))
                 .json(&body)
@@ -217,7 +255,11 @@ impl Provider {
     /// Chat completion, streamed. `on_delta` receives each piece of text as the
     /// model produces it, so the UI can show the answer as it is written rather
     /// than after a long silence; the full text is also returned.
-    pub async fn chat_stream<F: FnMut(&str)>(&self, messages: &[(String, String)], on_delta: F) -> Result<String> {
+    pub async fn chat_stream<F: FnMut(&str)>(
+        &self,
+        messages: &[(String, String)],
+        on_delta: F,
+    ) -> Result<String> {
         match self.cfg.kind.as_str() {
             "ollama" => self.chat_ollama(messages, on_delta).await,
             "openai" => self.chat_openai(messages, on_delta).await,
@@ -225,7 +267,11 @@ impl Provider {
         }
     }
 
-    async fn chat_ollama<F: FnMut(&str)>(&self, messages: &[(String, String)], mut on_delta: F) -> Result<String> {
+    async fn chat_ollama<F: FnMut(&str)>(
+        &self,
+        messages: &[(String, String)],
+        mut on_delta: F,
+    ) -> Result<String> {
         let url = format!("{}/api/chat", self.cfg.base_url.trim_end_matches('/'));
         let msgs: Vec<serde_json::Value> = messages
             .iter()
@@ -265,8 +311,15 @@ impl Provider {
         Ok(full)
     }
 
-    async fn chat_openai<F: FnMut(&str)>(&self, messages: &[(String, String)], mut on_delta: F) -> Result<String> {
-        let url = format!("{}/chat/completions", self.cfg.base_url.trim_end_matches('/'));
+    async fn chat_openai<F: FnMut(&str)>(
+        &self,
+        messages: &[(String, String)],
+        mut on_delta: F,
+    ) -> Result<String> {
+        let url = format!(
+            "{}/chat/completions",
+            self.cfg.base_url.trim_end_matches('/')
+        );
         let msgs: Vec<OpenAiRequestMessage> = messages
             .iter()
             .map(|(role, content)| OpenAiRequestMessage { role, content })
@@ -277,7 +330,12 @@ impl Provider {
             stream: true,
             temperature: 0.1,
         };
-        let resp = self.auth(self.client.post(&url)).json(&body).send().await?.error_for_status()?;
+        let resp = self
+            .auth(self.client.post(&url))
+            .json(&body)
+            .send()
+            .await?
+            .error_for_status()?;
 
         // Server-sent events: `data: {json}` lines, ending with `data: [DONE]`.
         let mut full = String::new();
@@ -289,7 +347,10 @@ impl Provider {
                 return Ok(false);
             }
             let v: serde_json::Value = serde_json::from_str(data)?;
-            if let Some(piece) = v.pointer("/choices/0/delta/content").and_then(|c| c.as_str()) {
+            if let Some(piece) = v
+                .pointer("/choices/0/delta/content")
+                .and_then(|c| c.as_str())
+            {
                 if !piece.is_empty() {
                     full.push_str(piece);
                     on_delta(piece);
@@ -330,7 +391,9 @@ pub fn classify(e: &Error) -> Problem {
         },
         // Ollama reports a missing model inside a streamed body:
         // `model "x" not found, try pulling it first`.
-        Error::Message(m) if m.contains("not found") && m.contains("model") => Problem::ModelMissing,
+        Error::Message(m) if m.contains("not found") && m.contains("model") => {
+            Problem::ModelMissing
+        }
         _ => Problem::Other,
     }
 }
@@ -353,7 +416,13 @@ pub fn describe(e: &Error) -> String {
 
 /// Ollama names carry an implicit `:latest` tag.
 fn same_ollama_model(installed: &str, wanted: &str) -> bool {
-    let norm = |s: &str| if s.contains(':') { s.to_string() } else { format!("{s}:latest") };
+    let norm = |s: &str| {
+        if s.contains(':') {
+            s.to_string()
+        } else {
+            format!("{s}:latest")
+        }
+    };
     norm(installed) == norm(wanted)
 }
 
@@ -368,13 +437,28 @@ pub struct Diagnosis {
 
 impl Diagnosis {
     fn failed(e: &Error) -> Self {
-        Diagnosis { ok: false, problem: Some(classify(e)), missing_models: vec![], detail: describe(e) }
+        Diagnosis {
+            ok: false,
+            problem: Some(classify(e)),
+            missing_models: vec![],
+            detail: describe(e),
+        }
     }
     fn with_missing(missing: Vec<String>) -> Self {
         if missing.is_empty() {
-            Diagnosis { ok: true, problem: None, missing_models: missing, detail: "connected".into() }
+            Diagnosis {
+                ok: true,
+                problem: None,
+                missing_models: missing,
+                detail: "connected".into(),
+            }
         } else {
-            Diagnosis { ok: false, problem: Some(Problem::ModelMissing), detail: format!("missing: {}", missing.join(", ")), missing_models: missing }
+            Diagnosis {
+                ok: false,
+                problem: Some(Problem::ModelMissing),
+                detail: format!("missing: {}", missing.join(", ")),
+                missing_models: missing,
+            }
         }
     }
 }
@@ -387,7 +471,10 @@ const KEEP_ALIVE: &str = "30m";
 
 /// Feeds a streaming response to `on_line` one complete line at a time.
 /// `on_line` returns `Ok(false)` to stop early (the stream said it is done).
-async fn read_lines<F: FnMut(&str) -> Result<bool>>(mut resp: reqwest::Response, mut on_line: F) -> Result<()> {
+async fn read_lines<F: FnMut(&str) -> Result<bool>>(
+    mut resp: reqwest::Response,
+    mut on_line: F,
+) -> Result<()> {
     let mut buf: Vec<u8> = Vec::new();
     while let Some(chunk) = resp.chunk().await? {
         buf.extend_from_slice(&chunk);
@@ -431,8 +518,8 @@ pub fn cosine_blob(query: &[f32], query_norm: f32, blob: &[u8]) -> f32 {
     }
     let mut dot = 0.0f32;
     let mut nb = 0.0f32;
-    for (x, c) in query.iter().zip(blob.chunks_exact(4)) {
-        let y = f32::from_le_bytes([c[0], c[1], c[2], c[3]]);
+    for (x, &c) in query.iter().zip(blob.as_chunks::<4>().0) {
+        let y = f32::from_le_bytes(c);
         dot += x * y;
         nb += y * y;
     }
@@ -453,7 +540,10 @@ mod tests {
 
     #[test]
     fn ollama_model_names_match_with_or_without_the_latest_tag() {
-        assert!(same_ollama_model("nomic-embed-text:latest", "nomic-embed-text"));
+        assert!(same_ollama_model(
+            "nomic-embed-text:latest",
+            "nomic-embed-text"
+        ));
         assert!(same_ollama_model("llama3.1:8b", "llama3.1:8b"));
         assert!(!same_ollama_model("llama3.1:8b", "llama3.1"));
     }
@@ -462,18 +552,31 @@ mod tests {
     fn a_missing_model_reported_in_a_stream_is_classified() {
         let e = Error::Message("model \"llama3.1\" not found, try pulling it first".into());
         assert_eq!(classify(&e), Problem::ModelMissing);
-        assert_eq!(classify(&Error::Message("something else".into())), Problem::Other);
+        assert_eq!(
+            classify(&Error::Message("something else".into())),
+            Problem::Other
+        );
     }
 
     /// Nothing listens on port 1 on a normal machine: a real connection
     /// failure must read as "unreachable", with its cause spelled out.
     #[test]
     fn a_refused_connection_is_unreachable() {
-        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
-        let provider = Provider::new(ProviderConfig { base_url: "http://127.0.0.1:1".into(), ..ProviderConfig::default() }).unwrap();
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let provider = Provider::new(ProviderConfig {
+            base_url: "http://127.0.0.1:1".into(),
+            ..ProviderConfig::default()
+        })
+        .unwrap();
         let err = rt.block_on(provider.embed(&["x".to_string()])).unwrap_err();
         assert_eq!(classify(&err), Problem::Unreachable);
-        assert!(describe(&err).len() > err.to_string().len(), "the cause chain is included");
+        assert!(
+            describe(&err).len() > err.to_string().len(),
+            "the cause chain is included"
+        );
         let diag = rt.block_on(provider.diagnose());
         assert_eq!((diag.ok, diag.problem), (false, Some(Problem::Unreachable)));
     }
@@ -482,7 +585,7 @@ mod tests {
     fn cosine_blob_matches_the_textbook_formula() {
         let q = [1.0f32, 2.0, 3.0];
         let v = [2.0f32, 0.5, -1.0];
-        let expected = (1.0 * 2.0 + 2.0 * 0.5 + 3.0 * -1.0) / (norm(&q) * norm(&v));
+        let expected = (1.0 * 2.0 + 2.0 * 0.5 - 3.0 * 1.0) / (norm(&q) * norm(&v));
         let got = cosine_blob(&q, norm(&q), &vec_to_blob(&v));
         assert!((got - expected).abs() < 1e-6, "{got} vs {expected}");
     }
@@ -490,8 +593,14 @@ mod tests {
     #[test]
     fn cosine_blob_is_zero_for_mismatched_or_empty_vectors() {
         let q = [1.0f32, 0.0];
-        assert_eq!(cosine_blob(&q, norm(&q), &vec_to_blob(&[1.0, 0.0, 0.0])), 0.0);
+        assert_eq!(
+            cosine_blob(&q, norm(&q), &vec_to_blob(&[1.0, 0.0, 0.0])),
+            0.0
+        );
         assert_eq!(cosine_blob(&q, norm(&q), &vec_to_blob(&[0.0, 0.0])), 0.0);
-        assert_eq!(cosine_blob(&[0.0, 0.0], 0.0, &vec_to_blob(&[1.0, 0.0])), 0.0);
+        assert_eq!(
+            cosine_blob(&[0.0, 0.0], 0.0, &vec_to_blob(&[1.0, 0.0])),
+            0.0
+        );
     }
 }

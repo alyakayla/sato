@@ -86,7 +86,12 @@ pub fn context_header(case_reference: Option<&str>, file_name: &str, page: Optio
 }
 
 /// The text embedded for a stored passage.
-pub fn document_input(model: &str, chunk: &Chunk, case_reference: Option<&str>, file_name: &str) -> String {
+pub fn document_input(
+    model: &str,
+    chunk: &Chunk,
+    case_reference: Option<&str>,
+    file_name: &str,
+) -> String {
     let header = context_header(case_reference, file_name, chunk.page);
     let prefix = prefix(model, Role::Document);
     if header.is_empty() {
@@ -126,19 +131,35 @@ mod tests {
 
     #[test]
     fn task_prefixes_by_model_family() {
-        assert_eq!(task_prefix("nomic-embed-text:latest", Role::Query), "search_query: ");
-        assert_eq!(task_prefix("nomic-embed-text", Role::Document), "search_document: ");
-        assert!(task_prefix("mxbai-embed-large", Role::Query).starts_with("Represent this sentence"));
+        assert_eq!(
+            task_prefix("nomic-embed-text:latest", Role::Query),
+            "search_query: "
+        );
+        assert_eq!(
+            task_prefix("nomic-embed-text", Role::Document),
+            "search_document: "
+        );
+        assert!(
+            task_prefix("mxbai-embed-large", Role::Query).starts_with("Represent this sentence")
+        );
         assert_eq!(task_prefix("mxbai-embed-large", Role::Document), "");
         assert_eq!(task_prefix("text-embedding-3-small", Role::Query), "");
     }
 
     #[test]
     fn production_inputs_carry_the_header_and_follow_the_prefix_switch() {
-        let d = document_input("nomic-embed-text", &chunk("Sixty days.", Some(3)), Some("case-01"), "lease.pdf");
+        let d = document_input(
+            "nomic-embed-text",
+            &chunk("Sixty days.", Some(3)),
+            Some("case-01"),
+            "lease.pdf",
+        );
         let q = query_input("nomic-embed-text", "notice period?");
         if USE_TASK_PREFIX {
-            assert_eq!(d, "search_document: case-01 — lease.pdf — p. 3\n\nSixty days.");
+            assert_eq!(
+                d,
+                "search_document: case-01 — lease.pdf — p. 3\n\nSixty days."
+            );
             assert_eq!(q, "search_query: notice period?");
         } else {
             assert_eq!(d, "case-01 — lease.pdf — p. 3\n\nSixty days.");
@@ -168,6 +189,9 @@ mod tests {
 
     #[test]
     fn the_format_changes_with_the_model() {
-        assert_ne!(format_id("nomic-embed-text"), format_id("mxbai-embed-large"));
+        assert_ne!(
+            format_id("nomic-embed-text"),
+            format_id("mxbai-embed-large")
+        );
     }
 }

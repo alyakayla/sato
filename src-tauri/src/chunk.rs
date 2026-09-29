@@ -30,7 +30,11 @@ pub fn chunk_text(pages: &[String], doc_id: &str) -> Vec<Chunk> {
 /// PDF — Word, text, HTML, CSV — arrives without pages; chunking only by page
 /// dropped all of their text and failed the import.
 pub fn chunk_extracted(extracted: &crate::extract::Extracted, doc_id: &str) -> Vec<Chunk> {
-    let chunks = extracted.pages.as_deref().map(|p| chunk_text(p, doc_id)).unwrap_or_default();
+    let chunks = extracted
+        .pages
+        .as_deref()
+        .map(|p| chunk_text(p, doc_id))
+        .unwrap_or_default();
     if !chunks.is_empty() {
         return chunks;
     }
@@ -44,7 +48,11 @@ pub fn chunk_unpaged(text: &str, doc_id: &str) -> Vec<Chunk> {
     let mut slices: Vec<Slice<'_>> = Vec::new();
     let mut offset = 0usize;
     for para in split_paragraphs(text) {
-        slices.push(Slice { text: para, page: None, offset });
+        slices.push(Slice {
+            text: para,
+            page: None,
+            offset,
+        });
         offset += para.len() + 1;
     }
     chunk_slices(slices, doc_id)
@@ -136,7 +144,11 @@ fn build_slices(pages: &[String]) -> Vec<Slice<'_>> {
         let page_no = Some(page_idx as i64 + 1);
         for para in split_paragraphs(page_text) {
             let start = offset;
-            out.push(Slice { text: para, page: page_no, offset: start });
+            out.push(Slice {
+                text: para,
+                page: page_no,
+                offset: start,
+            });
             offset += para.len() + 1;
         }
     }
@@ -233,9 +245,17 @@ mod tests {
         let para = "The court finds that the defendant breached the agreement. ".repeat(60);
         let pages = vec![para];
         let chunks = chunk_text(&pages, "doc1");
-        assert!(chunks.len() > 1, "expected multiple chunks, got {}", chunks.len());
+        assert!(
+            chunks.len() > 1,
+            "expected multiple chunks, got {}",
+            chunks.len()
+        );
         for c in &chunks {
-            assert!(c.text.len() <= CHUNK_TARGET_CHARS * 2, "chunk too large: {}", c.text.len());
+            assert!(
+                c.text.len() <= CHUNK_TARGET_CHARS * 2,
+                "chunk too large: {}",
+                c.text.len()
+            );
             assert_eq!(c.page, Some(1));
         }
     }
@@ -249,7 +269,10 @@ mod tests {
             assert!(c.end_char > c.start_char);
         }
         if chunks.len() > 1 {
-            assert!(chunks[1].start_char < chunks[0].end_char, "expected overlap");
+            assert!(
+                chunks[1].start_char < chunks[0].end_char,
+                "expected overlap"
+            );
         }
     }
 
@@ -264,7 +287,10 @@ mod tests {
 
 Second paragraph, with the operative clause.";
         let chunks = chunk_unpaged(text, "doc5");
-        assert!(!chunks.is_empty(), "a document without pages must still produce chunks");
+        assert!(
+            !chunks.is_empty(),
+            "a document without pages must still produce chunks"
+        );
         assert!(chunks.iter().all(|c| c.page.is_none()));
         assert!(chunks.iter().any(|c| c.text.contains("operative clause")));
     }
@@ -274,7 +300,9 @@ Second paragraph, with the operative clause.";
         let text = "A sentence about the lease terms and notice. ".repeat(200);
         let chunks = chunk_unpaged(&text, "doc6");
         assert!(chunks.len() > 1);
-        assert!(chunks.iter().all(|c| c.text.len() <= CHUNK_TARGET_CHARS * 2));
+        assert!(chunks
+            .iter()
+            .all(|c| c.text.len() <= CHUNK_TARGET_CHARS * 2));
     }
 
     /// The real import path: extract a file, then chunk what came out.
@@ -285,9 +313,13 @@ Second paragraph, with the operative clause.";
         std::fs::create_dir_all(&dir).unwrap();
 
         let txt = dir.join("notes.txt");
-        std::fs::write(&txt, "Notice of termination.
+        std::fs::write(
+            &txt,
+            "Notice of termination.
 
-The lessee shall give sixty days written notice.").unwrap();
+The lessee shall give sixty days written notice.",
+        )
+        .unwrap();
         let ex = crate::extract::extract(&txt, "text/plain").unwrap();
         let chunks = chunk_extracted(&ex, "txt");
         assert!(!chunks.is_empty(), "a .txt file must produce chunks");
@@ -298,7 +330,11 @@ The lessee shall give sixty days written notice.").unwrap();
         {
             let f = std::fs::File::create(&docx).unwrap();
             let mut zip = zip::ZipWriter::new(f);
-            zip.start_file("word/document.xml", zip::write::SimpleFileOptions::default()).unwrap();
+            zip.start_file(
+                "word/document.xml",
+                zip::write::SimpleFileOptions::default(),
+            )
+            .unwrap();
             zip.write_all(
                 br#"<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>The defendant breached clause 4.</w:t></w:r></w:p><w:p><w:r><w:t>Damages are claimed.</w:t></w:r></w:p></w:body></w:document>"#,
             )
@@ -315,7 +351,10 @@ The lessee shall give sixty days written notice.").unwrap();
 
     #[test]
     fn page_numbers_are_tracked() {
-        let pages = vec!["First page content.".to_string(), "Second page content.".to_string()];
+        let pages = vec![
+            "First page content.".to_string(),
+            "Second page content.".to_string(),
+        ];
         let chunks = chunk_text(&pages, "doc4");
         assert!(!chunks.is_empty());
         assert_eq!(chunks[0].page, Some(1));
