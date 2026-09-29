@@ -1,0 +1,118 @@
+# Validates every pull request into main: types, frontend and backend tests,
+# the design contrast gate, and that the Rust backend compiles on every
+# platform the release builds for (release.yml).
+
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# A new push to the PR supersedes the run still going for the old one.
+concurrency:
+  group: ci-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # Incremental builds only bloat the cache in CI.
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  test:
+    name: Types and tests
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Cache bun packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+
+      - name: Install system libraries (Tauri on Linux)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # Same key as release.yml's verify job, so PRs and main share one cache.
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          shared-key: verify-linux
+          # PR branches read the cache from main but do not write their own.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - run: bun install --frozen-lockfile
+
+      - name: Type check
+        run: bun run check
+
+      - name: Design contrast gate
+        run: bun run design:contrast
+
+      - name: Frontend tests
+        run: bun test
+
+      # Tauri embeds the frontend at compile time, so ../build must exist.
+      - name: Build frontend
+        run: bun run build
+
+      - name: Backend tests
+        working-directory: src-tauri
+        run: cargo test --lib --locked
+
+  compile:
+    name: Compile (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            platform: windows-latest
+          - name: macOS
+            platform: macos-latest
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Cache bun packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          # Nothing on main runs `cargo check` here, so PRs keep this cache warm.
+          shared-key: check-${{ matrix.platform }}
+
+      - run: bun install --frozen-lockfile
+
+      - name: Build frontend
+        run: bun run build
+
+      - name: Check backend
+        working-directory: src-tauri
+        run: cargo check --all-targets --locked
