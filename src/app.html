@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="icon" href="%sveltekit.assets%/favicon.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!--
+      No Content-Security-Policy meta tag here on purpose. SvelteKit inlines
+      its hydration bootstrap, and a hand-written `default-src 'self'` applies
+      to script-src, which blocks that inline script and yields a blank window.
+      The policy lives in tauri.conf.json instead, where Tauri can manage it.
+    -->
+    <title>Counsel</title>
+    %sveltekit.head%
+  </head>
+  <body data-sveltekit-preload-data="hover">
+    <div style="display: contents">%sveltekit.body%</div>
+  </body>
+</html>

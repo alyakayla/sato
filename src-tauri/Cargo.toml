@@ -1,0 +1,55 @@
+[package]
+name = "counsel"
+version = "0.1.0"
+description = "Counsel - a case and document manager for lawyers"
+authors = ["you"]
+edition = "2021"
+
+[lib]
+name = "counsel_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["protocol-asset"] }
+tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.12", features = ["json"] }
+rusqlite = { version = "0.32", features = ["bundled", "serde_json"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+pdf-extract = "0.7"
+encoding_rs = "0.8"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+quick-xml = "0.37"
+sha2 = "0.10"
+hex = "0.4"
+anyhow = "1"
+regex = "1"
+once_cell = "1"
+hnsw_rs = "0.3.4"
+
+# `tauri dev` builds unoptimised by default, which made vector scoring, SQLite
+# (compiled from source by rusqlite's `bundled`) and JSON handling many times
+# slower than in a release — enough to feel like a freeze. Dependencies are
+# built optimised once and cached; our own crate gets light optimisation so
+# incremental rebuilds stay quick.
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+panic = "abort"
+strip = true

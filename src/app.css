@@ -1,0 +1,1296 @@
+/* ===========================================================================
+   Counsel design system
+   ---------------------------------------------------------------------------
+   Five rules govern everything below.
+
+   1. INK, NOT COLOUR, FOR ACTIONS. A primary button is `--ink` - near-black
+      in light, near-white in dark. Colour is reserved for *data*: links,
+      mentions, the selected row, user-assigned category swatches, status
+      semantics. If every call to action were a saturated fill, nothing would
+      read as primary.
+
+   2. WARMTH. Neutrals carry a consistent amber bias (red > green > blue) and
+      every shadow is tinted brown, never black. Pure grey is what makes a UI
+      read as generic; the bias is what makes it feel chosen.
+
+   3. ONE EDGE PER SURFACE. A surface gets a border *or* a shadow, never both.
+      A double outline is the signature of untouched default CSS. Flat things
+      (cards, panels) are bordered; floating things (dialogs, menus, toasts)
+      are shadowed.
+
+   4. TYPE DOES THE WORK. Hierarchy comes from size, weight and space. Not
+      from colour, and not from boxes.
+
+   5. MEASURED CONTRAST. Every text pair clears WCAG AA 4.5:1 and every
+      control boundary clears 3:1, in both themes, verified by
+      `scripts/contrast-gate.ts` rather than by eye. That is why
+      `--border-control` is as dark as it is - a decorative border cannot be
+      the only cue that a field exists. Decorative dividers use `--border` and
+      are exempt.
+   ========================================================================= */
+
+/* Fonts are bundled, not fetched, so the app renders identically offline. */
+@import '@fontsource-variable/plus-jakarta-sans/wght.css';
+@import '@fontsource-variable/newsreader/opsz.css';
+@import '@fontsource-variable/jetbrains-mono/wght.css';
+
+:root {
+  /* Tells the WebView to render native scrollbars, dropdowns and caret to match
+     rather than defaulting to its own idea of light or dark. */
+  color-scheme: light;
+
+  /* -- Surfaces: three tiers. `--bg` is chrome and recedes, `--surface` is
+     content and lifts forward, `--surface-2` is the inner band - toolbars,
+     table headers, inset headers. The tone change does the grouping, so most
+     of the app needs no divider at all. ------------------------------------ */
+  --bg: #f4f2ef;
+  --surface: #ffffff;
+  --surface-2: #faf8f6;
+  --sunken: #edeae5;
+  --overlay: #ffffff;
+  --input: #ffffff;
+
+  --border: #e5e1db;
+  /* The only cue a field is a field, so it holds 3:1 (WCAG 1.4.11). */
+  --border-control: #878176;
+  --border-strong: #6e675c;
+
+  /* Four text steps, named as a hierarchy rather than an intensity, so
+     "muted" can never drift onto something load-bearing. */
+  --text: #1f1c18;
+  --text-secondary: #57514a;
+  --text-tertiary: #6f685e;
+  /* Decorative only. Never put a meaning the user needs in this. */
+  --text-disabled: #989187;
+
+  /* The accent is a warm terracotta held at higher chroma than the neutrals, so
+     it separates by saturation rather than by hue. Its legal uses are links,
+     mentions, the selected row, the active segment, and the inline code chip -
+     and nothing else. */
+  --accent: #b04a26;
+  --accent-hover: #9a3e1e;
+  --accent-soft: rgba(176, 74, 38, 0.09);
+  --accent-border: rgba(176, 74, 38, 0.28);
+
+  /* The action colour. In dark mode it inverts: a light button on a dark
+     canvas. The role is constant even though the colour flips. */
+  --ink: #211e1a;
+  --ink-hover: #100e0c;
+  --ink-ink: #ffffff;
+
+  /* Semantics, desaturated relative to the accent so the accent stays the
+     loudest thing on screen. */
+  --ok: #2f6f4e;
+  --ok-soft: rgba(47, 111, 78, 0.1);
+  --ok-border: rgba(47, 111, 78, 0.3);
+
+  --warn: #8a5b08;
+  --warn-soft: rgba(138, 91, 8, 0.11);
+  --warn-border: rgba(138, 91, 8, 0.3);
+
+  --danger: #a6362a;
+  --danger-soft: rgba(166, 54, 42, 0.1);
+  --danger-border: rgba(166, 54, 42, 0.32);
+
+  /* Zebra striping. A translucent white reads as a stripe on a dark surface and
+     as nothing at all on a light one, so the direction of the shift is a token
+     rather than a literal in each component. */
+  --stripe: rgba(74, 52, 28, 0.028);
+  --stripe-hover: rgba(74, 52, 28, 0.055);
+
+  /* -- Shape. Roundness is semantic: it says "this is a tag" or "this is a
+     control". Applying it uniformly says nothing, which is why only tags,
+     avatars and the segmented-control thumb are round. ---------------------- */
+  --radius-xs: 5px;
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+  --radius-full: 999px;
+
+  /* -- Control heights. 4px-grid padding on top of the type ladder. -------- */
+  --control-sm: 28px;
+  --control-md: 32px;
+  --control-lg: 36px;
+
+  /* -- Elevation: brown-tinted and diffuse, two layers (contact + ambient) at
+     every level. A single hard shadow looks pasted on. --------------------- */
+  --shadow-xs: 0 1px 2px rgba(53, 38, 22, 0.05);
+  --shadow-sm: 0 1px 2px rgba(53, 38, 22, 0.05), 0 2px 6px rgba(53, 38, 22, 0.04);
+  --shadow-md: 0 2px 4px rgba(53, 38, 22, 0.05), 0 8px 20px rgba(53, 38, 22, 0.07);
+  --shadow-lg: 0 10px 24px rgba(53, 38, 22, 0.09), 0 28px 64px rgba(53, 38, 22, 0.14);
+
+  /* The focus halo. Ink, not accent: an accent-coloured ring makes accent
+     mean "focused" and stops it meaning "actionable". */
+  --ring: 0 0 0 3px var(--sunken);
+
+  /* A flat warm scrim. Glass blur effects are banned - they are heavy, dated,
+     and they make the text behind a dialog unreadable. */
+  --scrim: rgba(43, 32, 20, 0.42);
+  --veil: rgba(244, 242, 239, 0.9);
+
+  /* -- Type: a humanist sans for data, a serif for voice ------------------ */
+  --font: 'Plus Jakarta Sans Variable', 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
+  --font-display: 'Newsreader Variable', 'Iowan Old Style', Georgia, serif;
+  --font-mono: 'JetBrains Mono Variable', 'Cascadia Code', Consolas, monospace;
+
+  /* -- Motion: a settle curve. Nothing bounces, nothing scales up. -------- */
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --dur-fast: 120ms;
+  --dur: 180ms;
+  --dur-slow: 240ms;
+
+  /* The WebView's PDF viewer paints its own dark chrome regardless of page
+     theme, so the well behind a document stays dark in both themes. */
+  --media-well: #2a2522;
+
+  /* The chat pane width is user-resizable; see stores.svelte.ts. */
+  --chat-w: 400px;
+}
+
+/* The dark theme is a warm brown-black, not the usual cold slate. */
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --bg: #191714;
+  --surface: #211e1a;
+  --surface-2: #1d1b17;
+  --sunken: #131210;
+  --overlay: #26231f;
+  --input: #1b1815;
+
+  --border: #33302a;
+  --border-control: #776f63;
+  --border-strong: #8a8175;
+
+  --text: #f2eee8;
+  --text-secondary: #bdb6ab;
+  --text-tertiary: #9b9387;
+  --text-disabled: #6e675d;
+
+  --accent: #e08a5a;
+  --accent-hover: #ee9b6e;
+  --accent-soft: rgba(224, 138, 90, 0.13);
+  --accent-border: rgba(224, 138, 90, 0.32);
+
+  --ink: #f2eee8;
+  --ink-hover: #ffffff;
+  --ink-ink: #191714;
+
+  --ok: #5cb98a;
+  --ok-soft: rgba(92, 185, 138, 0.13);
+  --ok-border: rgba(92, 185, 138, 0.32);
+
+  --warn: #d9a441;
+  --warn-soft: rgba(217, 164, 65, 0.13);
+  --warn-border: rgba(217, 164, 65, 0.32);
+
+  --danger: #e8756a;
+  --danger-soft: rgba(232, 117, 106, 0.13);
+  --danger-border: rgba(232, 117, 106, 0.34);
+
+  --stripe: rgba(255, 255, 255, 0.016);
+  --stripe-hover: rgba(255, 255, 255, 0.042);
+
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.34), 0 2px 6px rgba(0, 0, 0, 0.26);
+  --shadow-md: 0 2px 4px rgba(0, 0, 0, 0.3), 0 10px 24px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 10px 20px rgba(0, 0, 0, 0.36), 0 28px 64px rgba(0, 0, 0, 0.5);
+
+  --scrim: rgba(0, 0, 0, 0.56);
+  --veil: rgba(25, 23, 20, 0.9);
+}
+
+/* =========================================================================
+   Reset
+   ========================================================================= */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  font-family: var(--font);
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--text);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-feature-settings: 'cv05' 1, 'ss03' 1;
+  /* This is a data app: columns of numbers must align. */
+  font-variant-numeric: tabular-nums;
+  /* Theme swaps should not strobe, so only these two properties transition. */
+  transition:
+    background-color var(--dur) var(--ease),
+    color var(--dur) var(--ease);
+}
+
+::selection {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+/* =========================================================================
+   Focus
+   -------------------------------------------------------------------------
+   Every interactive element gets an ink ring on keyboard focus only, so a
+   pointer user never sees one and a keyboard user always does. Never remove
+   the outline without a replacement: that makes a component unreachable.
+   ========================================================================= */
+
+:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: var(--ink);
+  box-shadow: var(--ring);
+}
+
+/* =========================================================================
+   Typography
+   -------------------------------------------------------------------------
+   A ladder, not a set of arbitrary values. Line-heights tighten as size
+   grows, and tracking is zero for body text and negative only above 14px.
+   ========================================================================= */
+
+h1,
+h2,
+h3 {
+  font-weight: 600;
+}
+
+/* The display role. A serif is a voice, not a costume, so it appears on the
+   matter title and nowhere else. */
+h1 {
+  font-family: var(--font-display);
+  font-size: 25px;
+  font-weight: 500;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+}
+
+h2 {
+  font-size: 16px;
+  line-height: 1.35;
+  letter-spacing: -0.01em;
+}
+
+h3 {
+  font-size: 14px;
+  line-height: 1.4;
+  letter-spacing: -0.005em;
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+  text-underline-offset: 2px;
+}
+a:hover {
+  text-decoration: underline;
+}
+
+/* A button that navigates, styled as the link it behaves like. */
+.link {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 500;
+  text-align: left;
+}
+.link:hover {
+  text-decoration: underline;
+}
+
+code,
+kbd {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+}
+
+/* The inline code chip. Every code reference in this app is inline - a case
+   handle, a formula, a shell command - so the chip is the default treatment
+   and block code opts out via `pre`. */
+:not(pre) > code {
+  background: var(--sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  padding: 1px 5px;
+  color: var(--accent);
+  font-size: 0.86em;
+}
+
+pre {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* =========================================================================
+   Scrollbars: slim and self-effacing until hovered
+   ========================================================================= */
+
+::-webkit-scrollbar {
+  width: 11px;
+  height: 11px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-control);
+  border-radius: var(--radius-full);
+  border: 3px solid transparent;
+  background-clip: content-box;
+  opacity: 0.5;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--border-strong);
+  background-clip: content-box;
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* =========================================================================
+   Form controls
+   -------------------------------------------------------------------------
+   `--border-control` is deliberately visible: it is the only cue that a field
+   is a field, so it holds 3:1 against the fill (WCAG 1.4.11).
+   ========================================================================= */
+
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+}
+
+input,
+select,
+textarea {
+  background: var(--input);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-sm);
+  padding: 7px 10px;
+  width: 100%;
+  min-height: var(--control-md);
+  transition:
+    border-color var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease),
+    background-color var(--dur-fast) var(--ease);
+}
+
+input:hover:not(:disabled),
+select:hover:not(:disabled),
+textarea:hover:not(:disabled) {
+  border-color: var(--border-strong);
+}
+
+input:disabled,
+select:disabled,
+textarea:disabled {
+  color: var(--text-disabled);
+  cursor: not-allowed;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--text-tertiary);
+}
+
+/* The chevron is drawn as two clipped gradients rather than an SVG data URI: a
+   data URI has to carry its own colour, which would pin it to one theme, and a
+   CSS mask cannot work here because masking also erases the field's own fill
+   and a `select` takes no pseudo-element to hang a mask on. Two gradients give
+   the same arrow while letting the colour come from a token. */
+select {
+  cursor: pointer;
+  appearance: none;
+  padding-right: 30px;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--text-tertiary) 50%),
+    linear-gradient(135deg, var(--text-tertiary) 50%, transparent 50%);
+  background-repeat: no-repeat;
+  background-size:
+    5px 5px,
+    5px 5px;
+  background-position:
+    right 14px center,
+    right 9px center;
+}
+
+textarea {
+  resize: vertical;
+  line-height: 1.55;
+}
+
+label {
+  display: block;
+  font-size: 11.5px;
+  line-height: 1.45;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+
+/* A native control is chrome, not data, so it takes the action colour rather
+   than the accent. */
+input[type='checkbox'],
+input[type='radio'],
+input[type='range'] {
+  width: auto;
+  min-height: 0;
+  accent-color: var(--ink);
+  cursor: pointer;
+}
+
+/* =========================================================================
+   Buttons
+   -------------------------------------------------------------------------
+   8px corners, not stadium shapes. Pills on every control is marketing-page
+   styling; a stadium only earns its place on a tag or the segmented thumb.
+   ========================================================================= */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: var(--control-md);
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+  /* A quiet button: the fill defines it, so the outline is decorative. */
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: -0.005em;
+  cursor: pointer;
+  white-space: nowrap;
+  box-shadow: var(--shadow-xs);
+  transition:
+    background-color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease),
+    transform var(--dur-fast) var(--ease);
+}
+
+.btn:hover:not(:disabled) {
+  background: var(--sunken);
+  border-color: var(--border-strong);
+}
+
+.btn:active:not(:disabled) {
+  transform: translateY(1px);
+  box-shadow: none;
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+/* The primary action. Ink, never a saturated fill - a coloured button on every
+   CTA is the loudest tell that a UI was generated rather than designed. */
+.btn-primary {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--ink-ink);
+  font-weight: 600;
+}
+.btn-primary:hover:not(:disabled) {
+  background: var(--ink-hover);
+  border-color: var(--ink-hover);
+}
+
+.btn-ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-secondary);
+  box-shadow: none;
+}
+.btn-ghost:hover:not(:disabled) {
+  background: var(--sunken);
+  color: var(--text);
+  border-color: transparent;
+}
+
+.btn-danger {
+  background: transparent;
+  border-color: transparent;
+  color: var(--danger);
+  box-shadow: none;
+}
+.btn-danger:hover:not(:disabled) {
+  background: var(--danger-soft);
+  border-color: transparent;
+}
+
+.btn-sm {
+  min-height: var(--control-sm);
+  padding: 4px 10px;
+  font-size: 12.5px;
+}
+
+.btn-lg {
+  min-height: var(--control-lg);
+  padding: 8px 16px;
+  font-size: 13.5px;
+}
+
+/* =========================================================================
+   Surfaces
+   -------------------------------------------------------------------------
+   Flat things get a border, floating things get a shadow, and nothing gets
+   both.
+   ========================================================================= */
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* The inner band - toolbars, table headers, sub-panel heads. */
+.band {
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+}
+
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.panel-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.panel-title {
+  font-size: 12.5px;
+  line-height: 1.5;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+}
+
+/* =========================================================================
+   Badges
+   -------------------------------------------------------------------------
+   Uppercase micro-labels are a staple of "AI dashboard" styling, so status is
+   shown in sentence case at a readable size, and the colour carries the
+   meaning while the text carries the detail.
+
+   There is no dot by default. A coloured dot only appears where the status is
+   genuinely stateful (`.badge-dot`); four statuses times four dots is traffic
+   -light soup.
+   ========================================================================= */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 8px;
+  border-radius: var(--radius-full);
+  font-size: 11.5px;
+  line-height: 1.45;
+  font-weight: 600;
+  letter-spacing: 0;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+
+.badge-dot::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-radius: var(--radius-full);
+  background: currentColor;
+  flex-shrink: 0;
+}
+
+.badge-ok {
+  background: var(--ok-soft);
+  color: var(--ok);
+  border-color: var(--ok-border);
+}
+.badge-warn {
+  background: var(--warn-soft);
+  color: var(--warn);
+  border-color: var(--warn-border);
+}
+.badge-danger {
+  background: var(--danger-soft);
+  color: var(--danger);
+  border-color: var(--danger-border);
+}
+.badge-accent {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: var(--accent-border);
+}
+/* A muted badge is structural chrome - a role, a count, a page - not a
+   status, so it is flat and quiet. */
+.badge-muted {
+  background: var(--sunken);
+  color: var(--text-secondary);
+  border-color: var(--border);
+}
+
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-full);
+  flex-shrink: 0;
+}
+
+/* =========================================================================
+   Tables
+   -------------------------------------------------------------------------
+   Sentence-case headers on the inner band, 30px rows, zebra from a warm
+   wash, and a 2px accent bar for the selected row.
+   ========================================================================= */
+
+table.data {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+table.data th {
+  text-align: left;
+  height: var(--control-md);
+  padding: 0 12px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  font-weight: 600;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  white-space: nowrap;
+}
+
+table.data td {
+  height: 30px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+
+table.data tbody tr {
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease);
+}
+
+table.data tbody tr:nth-child(even) {
+  background: var(--stripe);
+}
+
+table.data tbody tr:hover {
+  background: var(--stripe-hover);
+}
+
+table.data tbody tr.selected {
+  background: var(--accent-soft);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+table.data tbody tr:last-child td {
+  border-bottom: none;
+}
+
+/* =========================================================================
+   Segmented control
+   -------------------------------------------------------------------------
+   A sunken track with a surface thumb. The thumb already says "this one is
+   selected", so a second coloured cue on top of it is noise.
+   ========================================================================= */
+
+.seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  padding: 2px;
+  background: var(--sunken);
+  border-radius: var(--radius-full);
+}
+
+.seg > button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-full);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 3px 10px;
+  white-space: nowrap;
+  transition:
+    background-color var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease);
+}
+
+.seg > button:hover {
+  color: var(--text);
+}
+
+.seg > button.on {
+  background: var(--surface);
+  color: var(--text);
+  font-weight: 600;
+  box-shadow: var(--shadow-xs);
+}
+
+/* =========================================================================
+   Utility
+   ========================================================================= */
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.row-between {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.col {
+  display: flex;
+  flex-direction: column;
+}
+.grow {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+.spacer {
+  flex: 1;
+}
+.muted {
+  color: var(--text-secondary);
+}
+.faint {
+  color: var(--text-tertiary);
+}
+.mono {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-variant-ligatures: none;
+}
+.truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* Section labels: the one place a small caps treatment is genuinely useful,
+   because it is a structural divider rather than a status. Sentence case
+   everywhere else - tracked-out caps is a dashboard tic. */
+.eyebrow {
+  font-size: 10.5px;
+  line-height: 1.3;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.field {
+  margin-bottom: 12px;
+}
+.field-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.hint {
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--text-tertiary);
+  margin-top: 4px;
+}
+
+.divider {
+  height: 1px;
+  background: var(--border);
+  margin: 16px 0;
+}
+
+/* =========================================================================
+   Empty states
+   -------------------------------------------------------------------------
+   Left-aligned, on the content grid, with a single muted glyph. A 52px
+   rounded tile with a centred glyph is a template; a tool is not a landing
+   page.
+   ========================================================================= */
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 8px;
+  padding: 48px 24px;
+  text-align: left;
+  color: var(--text-tertiary);
+}
+
+.empty-glyph {
+  font-size: 15px;
+  line-height: 1;
+  color: var(--text-disabled);
+}
+
+.empty-title {
+  font-size: 16px;
+  line-height: 1.35;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+
+.empty-hint {
+  font-size: 12.5px;
+  line-height: 1.5;
+  max-width: 38ch;
+}
+
+.empty-action {
+  margin-top: 4px;
+}
+
+/* A tint of whatever `--c` currently holds. The colour itself is set inline by
+   the component - a semantic token for a hearing, a user-chosen swatch for a
+   category - so the *amount* of tint is the design decision, and it belongs
+   here rather than scattered through the components. */
+.tint {
+  background: color-mix(in srgb, var(--c) 18%, transparent);
+}
+
+/* "Your action is being processed." A small square that tumbles a quarter
+   turn at a time, easing into each stop: it reads as work in progress, stays
+   muted so it does not pull the eye from content, and — being CSS-only — keeps
+   turning even while the app waits on the backend. */
+.spinner {
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--text-tertiary);
+  border-radius: 2px;
+  animation: spin-square 1.6s var(--ease) infinite;
+  flex-shrink: 0;
+}
+
+@keyframes spin-square {
+  0% {
+    transform: rotate(0deg);
+  }
+  25% {
+    transform: rotate(90deg);
+  }
+  50% {
+    transform: rotate(180deg);
+  }
+  75% {
+    transform: rotate(270deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+/* A flat sunken block. The `linear-gradient(90deg, ...)` shimmer is a stock
+   loading cliché, and on a page this dense it is just movement. */
+.skeleton {
+  background: var(--sunken);
+  border-radius: var(--radius-sm);
+}
+
+/* =========================================================================
+   Properties
+   -------------------------------------------------------------------------
+   A page's facts as one wrapping line of label/value pairs. Not a table and
+   not boxed: the tertiary label against the primary value does the work.
+   ========================================================================= */
+
+.props {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 20px;
+  margin: 6px 0 0;
+}
+
+.prop {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+  min-width: 0;
+}
+
+.prop-label {
+  font-size: 12.5px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+
+.prop-value {
+  margin: 0;
+  font-size: 13.5px;
+  color: var(--text);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.prop-value.mono {
+  font-size: 12px;
+}
+
+/* =========================================================================
+   Row actions
+   -------------------------------------------------------------------------
+   Secondary per-row commands. Hidden at rest so a dense list stays quiet;
+   revealed on hover, and on focus so keyboard users always reach them.
+   ========================================================================= */
+
+.row-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease);
+}
+
+:is(:hover, :focus-within) > .row-actions,
+:is(:hover, :focus-within) > * > .row-actions {
+  opacity: 1;
+}
+
+.row-action {
+  height: 22px;
+  padding: 0 7px;
+  border: none;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 11.5px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.row-action:hover {
+  background: var(--sunken);
+  color: var(--text);
+}
+
+/* =========================================================================
+   Dialog
+   -------------------------------------------------------------------------
+   A floating surface: shadow, no border, on a flat warm scrim.
+   ========================================================================= */
+
+dialog {
+  /* The reset above zeroes every margin, which pinned modal dialogs to the
+     top-left corner. Native modals centre themselves with auto margins. */
+  margin: auto;
+  border: none;
+  border-radius: var(--radius-lg);
+  background: var(--overlay);
+  color: var(--text);
+  padding: 0;
+  box-shadow: var(--shadow-lg);
+  max-width: min(580px, calc(100vw - 48px));
+  width: 100%;
+}
+
+dialog::backdrop {
+  background: var(--scrim);
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/* Dialogs settle up into place over a scrim that fades in with them. */
+dialog[open] {
+  animation: dialog-in var(--dur) var(--ease);
+}
+
+dialog[open]::backdrop {
+  animation: fade-in var(--dur) var(--ease);
+}
+
+@keyframes dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+/* =========================================================================
+   Motion
+   -------------------------------------------------------------------------
+   Small and quick: things arrive, they do not perform. Every entrance is a
+   fade plus a few pixels of travel from the direction it opens — never a
+   bounce or a scale-up (DESIGN §11). Exits are instant: a closing menu has
+   nothing left to say. `prefers-reduced-motion` collapses all of it (below).
+   ========================================================================= */
+
+/* A menu opening downward from its trigger. */
+@keyframes menu-drop {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+/* A menu or strip opening upward, above the composer. */
+@keyframes menu-rise {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+/* View transitions (lib/viewTransition.ts).
+   The page itself never cross-fades; only named regions move. Switching
+   views fades the old stage out quickly and settles the new one up into
+   place. When the layout changes, the rail, assistant and workspace groups
+   morph to their new boxes over the standard duration. */
+/* The page root is never snapshotted: what is not named stays live. */
+:root {
+  view-transition-name: none;
+}
+
+::view-transition-group(*) {
+  animation-duration: var(--dur-slow);
+  animation-timing-function: var(--ease);
+}
+
+::view-transition-old(stage) {
+  animation: vt-stage-out var(--dur-fast) var(--ease) both;
+}
+
+::view-transition-new(stage) {
+  animation: vt-stage-in var(--dur) var(--ease) both;
+}
+
+/* A panel resizing keeps its content crisp and anchored, instead of
+   stretching the snapshot. */
+::view-transition-old(rail),
+::view-transition-new(rail),
+::view-transition-old(assistant),
+::view-transition-new(assistant),
+::view-transition-old(workspace),
+::view-transition-new(workspace) {
+  height: 100%;
+  object-fit: cover;
+  object-position: left top;
+}
+
+@keyframes vt-stage-out {
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes vt-stage-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+/* Every button eases its hover colours, at zero specificity so any
+   component's own transition list still wins. */
+:where(button) {
+  transition:
+    background-color var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease),
+    opacity var(--dur-fast) var(--ease),
+    transform var(--dur-fast) var(--ease);
+}
+
+/* Press feedback: the same 1px settle as `.btn`, for the small controls that
+   are not `.btn` — rail icons, row actions, menu items, chips, tabs. */
+:is(
+    .r,
+    .icon,
+    .grip,
+    .row-action,
+    .chip,
+    .tab,
+    .crumb,
+    .opt,
+    .qf-item,
+    .ctx-item,
+    .send,
+    .seg > button
+  ):active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.dialog-head {
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.dialog-head h2 {
+  font-size: 15px;
+}
+
+.dialog-body {
+  padding: 18px;
+  max-height: calc(100vh - 220px);
+  overflow: auto;
+}
+
+.dialog-foot {
+  padding: 12px 18px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  background: var(--surface-2);
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+}
+
+/* Headless dialogs (quick find): the input is the header. */
+.dialog-body.flush {
+  padding: 0;
+  max-height: none;
+  overflow: visible;
+}
+
+/* =========================================================================
+   Alerts
+   -------------------------------------------------------------------------
+   Flat tints with a hairline. In-surface, not floating, so no shadow.
+   ========================================================================= */
+
+.alert {
+  padding: 9px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 12.5px;
+  line-height: 1.5;
+  border: 1px solid;
+}
+.alert-danger {
+  background: var(--danger-soft);
+  border-color: var(--danger-border);
+  color: var(--danger);
+}
+.alert-ok {
+  background: var(--ok-soft);
+  border-color: var(--ok-border);
+  color: var(--ok);
+}
+.alert-warn {
+  background: var(--warn-soft);
+  border-color: var(--warn-border);
+  color: var(--warn);
+}
+.alert-accent {
+  background: var(--accent-soft);
+  border-color: var(--accent-border);
+  color: var(--accent);
+}
+
+/* =========================================================================
+   Motion
+   -------------------------------------------------------------------------
+   Honour the OS setting: animation is a courtesy, not a feature.
+   ========================================================================= */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    /* 0s, not 0.01ms: any non-zero duration gives *every* element a
+       transition (the default property is `all`), which made a theme swap
+       animate the whole page — slower for exactly the users who asked for
+       less motion. */
+    transition-duration: 0s !important;
+    transition-delay: 0s !important;
+    scroll-behavior: auto !important;
+  }
+}
