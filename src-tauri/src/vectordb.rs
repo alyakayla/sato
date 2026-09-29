@@ -1,4 +1,4 @@
-//! Counsel's embedded vector database.
+//! sato's embedded vector database.
 //!
 //! One collection of *points*: a chunk of a document (its text and position,
 //! the payload) together with its embedding. It lives in memory — the app is
@@ -692,7 +692,7 @@ mod tests {
     use std::collections::HashSet;
 
     fn tempdir(name: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("counsel-vdb-{name}-{}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("sato-vdb-{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&d);
         d
     }

@@ -33,7 +33,7 @@ pub struct Case {
     pub people_count: i64,
 }
 
-/// A party, witness, judge, or opposing counsel attached to a case.
+/// A party, witness, judge, or the other side's lawyer attached to a case.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Person {

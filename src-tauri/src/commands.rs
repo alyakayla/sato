@@ -1236,7 +1236,7 @@ fn recent_history(
 }
 
 const SYSTEM_PROMPT: &str = "\
-You are Counsel, an assistant embedded in a law firm's case management desktop app.
+You are satō, an assistant embedded in a law firm's case management desktop app.
 
 Rules you must follow:
 1. Answer only from the provided case context. Treat it as confidential, privileged material.
@@ -2288,12 +2288,15 @@ fn reconcile_vectors(conn: &Connection, vectors: &Arc<VectorDb>, corrupt: &[Stri
     Ok(())
 }
 
+/// The database file inside the app data directory.
+const DB_FILE: &str = "sato.db";
+
 pub fn init(app: &AppHandle) -> Result<()> {
     let data_dir = app.path().app_data_dir()?;
     std::fs::create_dir_all(&data_dir)?;
-    let conn = db::open(&data_dir.join("counsel.db"))?;
+    let conn = db::open(&data_dir.join(DB_FILE))?;
     seed_defaults(&conn)?;
-    let reader = db::open_reader(&data_dir.join("counsel.db"))?;
+    let reader = db::open_reader(&data_dir.join(DB_FILE))?;
 
     let (vectors, report) = VectorDb::open(&data_dir.join("vectors"))?;
     migrate_legacy_chunks(&conn, &vectors)?;
@@ -2322,7 +2325,7 @@ mod vector_migration_tests {
     use std::path::PathBuf;
 
     fn tempdir(name: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("counsel-mig-{name}-{}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("sato-mig-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         d
     }

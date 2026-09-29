@@ -1,6 +1,6 @@
 use serde::{Serialize, Serializer};
 
-/// Every fallible operation in Counsel returns this error, which serializes to a
+/// Every fallible operation in sato returns this error, which serializes to a
 /// plain string so the Svelte side can display it directly.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {

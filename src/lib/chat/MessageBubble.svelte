@@ -51,7 +51,7 @@
       {#if isUser}
         <span class="who">{t('chat.you')}</span>
       {:else}
-        <span class="who">Counsel</span>
+        <span class="who">satō</span>
       {/if}
       <span class="faint" title={message.createdAt}>{formatRelative(message.createdAt)}</span>
     </div>

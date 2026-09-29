@@ -8,7 +8,7 @@
  * the question back on.
  */
 
-const SKIP_KEY = 'counsel.skipDeleteConfirm';
+const SKIP_KEY = 'sato.skipDeleteConfirm';
 
 function readSkip(): boolean {
   try {

@@ -61,5 +61,5 @@ pub fn run() {
             commands::case_tree,
         ])
         .run(tauri::generate_context!())
-        .expect("error while running counsel");
+        .expect("error while running sato");
 }

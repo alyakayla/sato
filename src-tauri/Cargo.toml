@@ -1,12 +1,12 @@
 [package]
-name = "counsel"
+name = "sato"
 version = "0.1.0"
-description = "Counsel - a case and document manager for lawyers"
+description = "sato - a case and document manager for lawyers"
 authors = ["you"]
 edition = "2021"
 
 [lib]
-name = "counsel_lib"
+name = "sato_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

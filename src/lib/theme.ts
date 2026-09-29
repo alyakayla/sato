@@ -17,7 +17,7 @@
 
 export type Theme = 'light' | 'dark';
 
-const THEME_KEY = 'counsel.theme';
+const THEME_KEY = 'sato.theme';
 
 function preferred(): Theme {
   const stored = localStorage.getItem(THEME_KEY);

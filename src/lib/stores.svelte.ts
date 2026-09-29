@@ -105,7 +105,7 @@ export function askAbout(nodeKey: string): void {
 }
 
 /** Chat panel width in pixels, persisted across restarts. */
-const CHAT_W_KEY = 'counsel.chatWidth';
+const CHAT_W_KEY = 'sato.chatWidth';
 const chatWidth = Number(localStorage.getItem(CHAT_W_KEY));
 export const chatPanelWidth = new Store<number>(
   Number.isFinite(chatWidth) && chatWidth >= 300 ? chatWidth : 400,
@@ -118,7 +118,7 @@ export function setChatPanelWidth(px: number): void {
 }
 
 /** Whether the assistant column is hidden, persisted across restarts. */
-const CHAT_HIDDEN_KEY = 'counsel.chatCollapsed';
+const CHAT_HIDDEN_KEY = 'sato.chatCollapsed';
 export const chatCollapsed = new Store<boolean>(localStorage.getItem(CHAT_HIDDEN_KEY) === '1');
 
 export function toggleChat(): void {

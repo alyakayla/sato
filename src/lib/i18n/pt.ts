@@ -455,7 +455,7 @@ export const pt: Record<MessageKey, string> = {
   'problem.unreachable.title': 'Não foi possível conectar ao {provider}',
   'problem.unreachable.install': 'Instale o Ollama, se ainda não estiver instalado:',
   'problem.unreachable.start': 'Inicie-o — abra o app do Ollama ou execute',
-  'problem.unreachable.pull': 'Baixe os modelos que o Counsel usa (clique para copiar):',
+  'problem.unreachable.pull': 'Baixe os modelos que o satō usa (clique para copiar):',
   'problem.unreachable.cloud': 'Verifique sua conexão com a internet e a URL base ({url}) nas Configurações.',
   'problem.model_missing.title': 'Um modelo não foi baixado',
   'problem.model_missing.body': 'Execute no terminal (clique para copiar) e verifique novamente:',

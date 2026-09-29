@@ -410,7 +410,7 @@
     const url = URL.createObjectURL(new Blob([`${head}\n${body}`], { type: 'text/csv' }));
     const a = document.createElement('a');
     a.href = url;
-    a.download = `counsel-${dataset}.csv`;
+    a.download = `sato-${dataset}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   }

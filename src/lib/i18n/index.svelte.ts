@@ -22,7 +22,7 @@ export const LOCALES: { id: Locale; short: string; name: string; intl: string }[
 
 const DICTS: Record<Locale, Record<MessageKey, string>> = { en, pt };
 
-const KEY = 'counsel.locale';
+const KEY = 'sato.locale';
 
 function initial(): Locale {
   const stored = localStorage.getItem(KEY);

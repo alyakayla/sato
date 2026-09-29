@@ -456,7 +456,7 @@ export const en = {
   'problem.unreachable.title': 'Can\'t reach {provider}',
   'problem.unreachable.install': 'Install Ollama, if it isn\'t installed:',
   'problem.unreachable.start': 'Start it — open the Ollama app, or run',
-  'problem.unreachable.pull': 'Download the models Counsel uses (click to copy):',
+  'problem.unreachable.pull': 'Download the models satō uses (click to copy):',
   'problem.unreachable.cloud': 'Check your internet connection and the Base URL ({url}) in Settings.',
   'problem.model_missing.title': 'A model isn\'t downloaded',
   'problem.model_missing.body': 'Run this in a terminal (click to copy), then check again:',

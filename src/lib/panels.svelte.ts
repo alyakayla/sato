@@ -10,7 +10,7 @@ import { withTransition } from './viewTransition';
  * events also give us one code path for mouse, pen and touch.
  */
 
-const LAYOUT_KEY = 'counsel.layout';
+const LAYOUT_KEY = 'sato.layout';
 
 function load(): Layout {
   try {
