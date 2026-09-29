@@ -1,0 +1,152 @@
+# Builds sato for Windows, Linux and macOS (Apple Silicon and Intel) on every
+# push to main and publishes the installers as a GitHub release.
+#
+# Tauri links each platform's native webview, so every target is built on its
+# own OS runner; macOS builds both architectures from one runner.
+#
+# Caches: bun's install cache (keyed on bun.lock) and the Rust build (target
+# directory and cargo registry, per platform and target).
+#
+# The builds are unsigned: Windows SmartScreen and macOS Gatekeeper will warn
+# until code-signing secrets are added (see tauri-action's signing inputs).
+
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# Queue rather than cancel: every push to main should end in a release.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  # Incremental builds only bloat the cache in CI.
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  verify:
+    name: Verify (types and tests)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Cache bun packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+
+      - name: Install system libraries (Tauri on Linux)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          shared-key: verify-linux
+
+      - run: bun install --frozen-lockfile
+
+      - name: Type check
+        run: bun run check
+
+      - name: Frontend tests
+        run: bun test
+
+      # Tauri embeds the frontend at compile time, so ../build must exist.
+      - name: Build frontend
+        run: bun run build
+
+      - name: Backend tests
+        working-directory: src-tauri
+        run: cargo test --lib --locked
+
+  release:
+    name: Build (${{ matrix.name }})
+    needs: verify
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS (Apple Silicon)
+            platform: macos-latest
+            target: aarch64-apple-darwin
+            args: --target aarch64-apple-darwin
+          - name: macOS (Intel)
+            platform: macos-latest
+            target: x86_64-apple-darwin
+            args: --target x86_64-apple-darwin
+          - name: Linux
+            platform: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            args: ''
+          - name: Windows
+            platform: windows-latest
+            target: x86_64-pc-windows-msvc
+            args: ''
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Cache bun packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+
+      - name: Install system libraries (Tauri on Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          key: ${{ matrix.target }}
+
+      - run: bun install --frozen-lockfile
+
+      - name: Build and publish
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tauriScript: bun run tauri
+          args: ${{ matrix.args }}
+          # Unique per push: the app version plus the run number.
+          tagName: v__VERSION__-build.${{ github.run_number }}
+          releaseName: satō v__VERSION__ (build ${{ github.run_number }})
+          releaseBody: |
+            Automated build of ${{ github.sha }}.
+
+            Unsigned: Windows SmartScreen and macOS Gatekeeper will ask for confirmation on first launch.
+          releaseCommitish: ${{ github.sha }}
+          releaseDraft: false
+          prerelease: false

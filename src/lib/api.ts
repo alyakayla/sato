@@ -24,6 +24,18 @@ import type {
 } from './types';
 
 /**
+ * Runs a command that returns nothing and resolves to `true` once it succeeds.
+ *
+ * Tauri resolves a Rust `()` to `null` — the same value `guard()` uses for
+ * "failed". Checks like `if (ok !== null)` therefore treated every successful
+ * delete, link or save as a failure: nothing refreshed, no toast, a sheet
+ * that stayed "Unsaved". A distinct success value fixes every caller at once.
+ */
+function run(cmd: string, args?: Record<string, unknown>): Promise<true> {
+  return invoke<void>(cmd, args).then(() => true as const);
+}
+
+/**
  * Thin typed wrapper over the Rust command surface. Keeping every invoke in one
  * place means a command rename is a single edit here rather than a hunt
  * through components.
@@ -35,7 +47,7 @@ export const api = {
   saveProvider: (config: ProviderConfig) =>
     invoke<ProviderStatus>('save_provider', { config }),
   testProvider: () => invoke<ProviderStatus>('test_provider'),
-  setRetrievalLimit: (limit: number) => invoke<void>('set_retrieval_limit', { limit }),
+  setRetrievalLimit: (limit: number) => run('set_retrieval_limit', { limit }),
 
   listCategories: () => invoke<Category[]>('list_categories'),
   saveCategory: (input: {
@@ -45,7 +57,7 @@ export const api = {
     color: string;
     description?: string | null;
   }) => invoke<Category>('save_category', input),
-  deleteCategory: (id: string) => invoke<void>('delete_category', { id }),
+  deleteCategory: (id: string) => run('delete_category', { id }),
 
   listCases: (filter?: CaseFilter) => invoke<Case[]>('list_cases', { filter }),
   getCase: (id: string) => invoke<Case>('get_case', { id }),
@@ -58,7 +70,7 @@ export const api = {
     description?: string | null;
     openedAt?: string | null;
   }) => invoke<Case>('save_case', { input }),
-  deleteCase: (id: string) => invoke<void>('delete_case', { id }),
+  deleteCase: (id: string) => run('delete_case', { id }),
 
   listPeople: (search?: string) => invoke<Person[]>('list_people', { search }),
   savePerson: (input: {
@@ -70,12 +82,12 @@ export const api = {
     phone?: string | null;
     notes?: string | null;
   }) => invoke<Person>('save_person', input),
-  deletePerson: (id: string) => invoke<void>('delete_person', { id }),
+  deletePerson: (id: string) => run('delete_person', { id }),
   caseRoster: (caseId: string) => invoke<CaseRoster>('case_roster', { caseId }),
   linkPerson: (caseId: string, personId: string, roleInCase?: string) =>
-    invoke<void>('link_person', { caseId, personId, roleInCase }),
+    run('link_person', { caseId, personId, roleInCase }),
   unlinkPerson: (caseId: string, personId: string) =>
-    invoke<void>('unlink_person', { caseId, personId }),
+    run('unlink_person', { caseId, personId }),
 
   listDocuments: (opts: { caseId?: string | null; search?: string } = {}) =>
     invoke<Document[]>('list_documents', { caseId: opts.caseId ?? null, search: opts.search }),
@@ -83,8 +95,8 @@ export const api = {
   listChunks: (documentId: string) => invoke<Chunk[]>('list_chunks', { documentId }),
   importDocuments: (paths: string[], caseId?: string | null) =>
     invoke<Document[]>('import_documents', { paths, caseId: caseId ?? null }),
-  reindexDocument: (id: string) => invoke<void>('reindex_document', { id }),
-  deleteDocument: (id: string) => invoke<void>('delete_document', { id }),
+  reindexDocument: (id: string) => run('reindex_document', { id }),
+  deleteDocument: (id: string) => run('delete_document', { id }),
   readDocumentText: (id: string) => invoke<DocumentText>('read_document_text', { id }),
   searchDocuments: (query: string, caseId?: string | null, limit?: number) =>
     invoke<SearchHit[]>('search_documents', { query, caseId: caseId ?? null, limit }),
@@ -93,7 +105,7 @@ export const api = {
     invoke<Conversation[]>('list_conversations', { caseId: caseId ?? null }),
   createConversation: (title?: string, caseId?: string | null) =>
     invoke<Conversation>('create_conversation', { title: title ?? null, caseId: caseId ?? null }),
-  deleteConversation: (id: string) => invoke<void>('delete_conversation', { id }),
+  deleteConversation: (id: string) => run('delete_conversation', { id }),
   listMessages: (conversationId: string) =>
     invoke<Message[]>('list_messages', { conversationId }),
   /**
@@ -119,8 +131,8 @@ export const api = {
     data: string;
     rows?: number;
     cols?: number;
-  }) => invoke<void>('save_spreadsheet', input),
-  deleteSpreadsheet: (id: string) => invoke<void>('delete_spreadsheet', { id }),
+  }) => run('save_spreadsheet', input),
+  deleteSpreadsheet: (id: string) => run('delete_spreadsheet', { id }),
 
   listEvents: (opts: { caseId?: string | null; from?: string; to?: string } = {}) =>
     invoke<CalendarEvent[]>('list_events', {
@@ -129,7 +141,7 @@ export const api = {
       to: opts.to ?? null,
     }),
   saveEvent: (input: EventInput) => invoke<CalendarEvent>('save_event', { input }),
-  deleteEvent: (id: string) => invoke<void>('delete_event', { id }),
+  deleteEvent: (id: string) => run('delete_event', { id }),
 
   caseTree: () => invoke<CaseTree>('case_tree'),
 };

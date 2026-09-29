@@ -472,5 +472,15 @@ export const pt: Record<MessageKey, string> = {
   'problem.copy': 'Copiar comando',
   'problem.copied': 'Comando copiado',
   'problem.fixed': '{provider} está pronto',
+  'graph.title': 'Conexões',
+  'graph.hint': 'Arraste para mover · Ctrl+rolagem para zoom',
+  'graph.label': 'Grafo de conexões do caso. Setas movem, mais e menos dão zoom, 0 ajusta.',
+  'graph.empty': 'Nada conectado a este caso ainda',
+  'graph.zoomIn': 'Aproximar',
+  'graph.zoomOut': 'Afastar',
+  'graph.fit': 'Ajustar à tela',
+  'undo.rollback': 'Desfazer',
+  'undo.restored': 'Restaurado',
+  'chat.deleted': 'Conversa excluída',
   // @@end
 };

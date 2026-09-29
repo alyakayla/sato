@@ -63,16 +63,15 @@ pub fn keyword_search(
 const STOPWORDS: &[&str] = &[
     // English
     "a", "an", "and", "are", "as", "at", "be", "by", "can", "did", "do", "does", "for", "from",
-    "had", "has", "have", "how", "i", "in", "is", "it", "its", "me", "my", "of", "on", "or",
-    "our", "please", "that", "the", "their", "there", "this", "to", "was", "we", "were", "what",
-    "when", "where", "which", "who", "why", "will", "with", "you", "your", "about", "any", "all",
-    "tell", "show", "list", "give", "find",
-    // Portuguese
-    "o", "os", "as", "um", "uma", "uns", "umas", "de", "da", "do", "das", "dos", "em", "na",
-    "no", "nas", "nos", "e", "ou", "que", "se", "por", "para", "com", "sem", "ao", "aos", "à",
-    "às", "é", "foi", "ser", "são", "qual", "quais", "quando", "onde", "como", "quem", "porque",
-    "isso", "isto", "esse", "essa", "este", "esta", "meu", "minha", "seu", "sua", "me", "nos",
-    "há", "tem", "sobre", "todos", "todas", "mostre", "liste",
+    "had", "has", "have", "how", "i", "in", "is", "it", "its", "me", "my", "of", "on", "or", "our",
+    "please", "that", "the", "their", "there", "this", "to", "was", "we", "were", "what", "when",
+    "where", "which", "who", "why", "will", "with", "you", "your", "about", "any", "all", "tell",
+    "show", "list", "give", "find", // Portuguese
+    "o", "os", "as", "um", "uma", "uns", "umas", "de", "da", "do", "das", "dos", "em", "na", "no",
+    "nas", "nos", "e", "ou", "que", "se", "por", "para", "com", "sem", "ao", "aos", "à", "às", "é",
+    "foi", "ser", "são", "qual", "quais", "quando", "onde", "como", "quem", "porque", "isso",
+    "isto", "esse", "essa", "este", "esta", "meu", "minha", "seu", "sua", "me", "nos", "há", "tem",
+    "sobre", "todos", "todas", "mostre", "liste",
 ];
 
 /// Turns a natural-language question into an FTS5 MATCH expression.
@@ -91,7 +90,10 @@ pub(crate) fn to_fts_query(query: &str) -> String {
         .filter(|t| !t.is_empty())
         .map(|t| t.to_lowercase())
         // Keep numbers of any length ("5", "12"): section and clause numbers matter.
-        .filter(|t| t.chars().all(|c| c.is_ascii_digit()) || (t.chars().count() > 1 && !STOPWORDS.contains(&t.as_str())))
+        .filter(|t| {
+            t.chars().all(|c| c.is_ascii_digit())
+                || (t.chars().count() > 1 && !STOPWORDS.contains(&t.as_str()))
+        })
         .filter(|t| seen.insert(t.clone()))
         .take(16)
         .map(|t| format!("\"{}\"*", t.replace('"', "")))
@@ -115,7 +117,14 @@ pub fn hybrid_search(
     docs: &[String],
 ) -> rusqlite::Result<Vec<SearchHit>> {
     let over_fetch = (limit * 4).max(20);
-    let vec_hits = vectors.search(query, over_fetch, Filter { docs, case: case_filter });
+    let vec_hits = vectors.search(
+        query,
+        over_fetch,
+        Filter {
+            docs,
+            case: case_filter,
+        },
+    );
     let kw_hits = keyword_search(conn, query_text, over_fetch, case_filter, docs)?;
 
     const K: f64 = 60.0;
@@ -133,7 +142,11 @@ pub fn hybrid_search(
     fused.truncate(limit);
 
     // Normalize RRF scores to 0..1 so the UI can show a confidence percentage.
-    let max = fused.first().map(|(_, s)| *s).unwrap_or(1.0).max(f64::EPSILON);
+    let max = fused
+        .first()
+        .map(|(_, s)| *s)
+        .unwrap_or(1.0)
+        .max(f64::EPSILON);
 
     let mut out = Vec::with_capacity(fused.len());
     for (chunk_id, score) in fused {
@@ -153,7 +166,9 @@ pub fn hydrate(
     chunk_id: &str,
     score: f64,
 ) -> rusqlite::Result<Option<SearchHit>> {
-    let Some(chunk) = vectors.chunk(chunk_id) else { return Ok(None) };
+    let Some(chunk) = vectors.chunk(chunk_id) else {
+        return Ok(None);
+    };
     let found = conn.query_row(
         "SELECT d.file_name, c.reference
            FROM documents d
@@ -167,7 +182,12 @@ pub fn hydrate(
         Err(rusqlite::Error::QueryReturnedNoRows) => return Ok(None),
         Err(e) => return Err(e),
     };
-    Ok(Some(SearchHit { chunk, score, document_name, case_reference }))
+    Ok(Some(SearchHit {
+        chunk,
+        score,
+        document_name,
+        case_reference,
+    }))
 }
 
 #[cfg(test)]
@@ -184,12 +204,18 @@ mod tests {
 
     #[test]
     fn portuguese_stopwords_are_dropped_too() {
-        assert_eq!(to_fts_query("Qual é o prazo do recurso?"), "\"prazo\"* OR \"recurso\"*");
+        assert_eq!(
+            to_fts_query("Qual é o prazo do recurso?"),
+            "\"prazo\"* OR \"recurso\"*"
+        );
     }
 
     #[test]
     fn numbers_survive_even_when_short() {
-        assert_eq!(to_fts_query("section 5 of the lease"), "\"section\"* OR \"5\"* OR \"lease\"*");
+        assert_eq!(
+            to_fts_query("section 5 of the lease"),
+            "\"section\"* OR \"5\"* OR \"lease\"*"
+        );
     }
 
     #[test]

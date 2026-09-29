@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { toast } from '$lib/stores.svelte';
+  import { dismissToast, toast } from '$lib/stores.svelte';
 </script>
 
 {#if toast.value}
@@ -8,6 +8,21 @@
       {toast.value.kind === 'ok' ? '✓' : toast.value.kind === 'warn' ? '!' : '✕'}
     </span>
     <span class="text">{toast.value.text}</span>
+    {#if toast.value.action}
+      <button
+        class="action"
+        onclick={() => {
+          // Take the action before dismissing: the toast (and so its action)
+          // is gone the moment it is dismissed.
+          const run = toast.value?.action?.run;
+          dismissToast();
+          run?.();
+        }}
+      >
+        <span aria-hidden="true">→</span>
+        <span class="action-label">{toast.value.action.label}</span>
+      </button>
+    {/if}
   </div>
 {/if}
 
@@ -57,5 +72,30 @@
   .text {
     line-height: 1.45;
     word-break: break-word;
+  }
+
+  /* The toast's one action: an arrow and an underlined word, in the toast's
+     own colour, so it reads as part of the message rather than a button. */
+  .action {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 5px;
+    margin-left: 6px;
+    padding: 0;
+    border: none;
+    background: none;
+    color: inherit;
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .action-label {
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  .action:hover .action-label {
+    text-decoration-thickness: 2px;
   }
 </style>

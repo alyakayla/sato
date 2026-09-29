@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { deleteWithUndo } from '$lib/undoDelete';
   import { confirmDelete } from '$lib/confirm.svelte';
   import { t } from '$lib/i18n/index.svelte';
   import { api, formatRelative } from '$lib/api';
@@ -103,12 +104,14 @@
   async function remove(): Promise<void> {
     if (!sheet) return;
     if (!(await confirmDelete({ title: t('confirm.sheet.title'), message: t('confirm.sheet.body', { name: sheet.name }) }))) return;
-    const ok = await guard(t('sheet.err.delete'), () => api.deleteSpreadsheet(sheet!.id));
-    if (ok !== null) {
-      notify('ok', t('sheet.deleted'));
-      await refreshTree();
-      openPane({ kind: 'grid' });
-    }
+    const id = sheet.id;
+    await deleteWithUndo({
+      key: `sheet:${id}`,
+      message: t('sheet.deleted'),
+      before: () => openPane({ kind: 'grid' }),
+      commit: async () => (await guard(t('sheet.err.delete'), () => api.deleteSpreadsheet(id))) !== null,
+      after: () => refreshTree(),
+    });
   }
 
   function exportCsv(): void {

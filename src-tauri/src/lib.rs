@@ -1,7 +1,9 @@
 mod chunk;
 mod commands;
 mod db;
+mod embedtext;
 mod error;
+mod eval;
 mod extract;
 mod models;
 mod providers;

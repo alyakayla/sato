@@ -106,7 +106,11 @@ struct Inner {
 
 impl Inner {
     fn main_dim(&self) -> usize {
-        self.dims.iter().max_by_key(|(_, n)| **n).map(|(d, _)| *d).unwrap_or(0)
+        self.dims
+            .iter()
+            .max_by_key(|(_, n)| **n)
+            .map(|(d, _)| *d)
+            .unwrap_or(0)
     }
 
     fn tombstones(&self) -> usize {
@@ -153,9 +157,9 @@ pub struct Filter<'a> {
 impl Filter<'_> {
     fn allows_doc(&self, inner: &Inner, doc: &str) -> bool {
         (self.docs.is_empty() || self.docs.iter().any(|d| d == doc))
-            && self.case.map_or(true, |c| {
-                inner.doc_case.get(doc).and_then(|x| x.as_deref()) == Some(c)
-            })
+            && self
+                .case
+                .is_none_or(|c| inner.doc_case.get(doc).and_then(|x| x.as_deref()) == Some(c))
     }
 }
 
@@ -179,7 +183,11 @@ impl VectorDb {
     pub fn open(dir: &Path) -> io::Result<(Arc<Self>, OpenReport)> {
         fs::create_dir_all(dir)?;
         let mut inner = Inner::default();
-        let mut report = OpenReport { documents: 0, points: 0, corrupt: Vec::new() };
+        let mut report = OpenReport {
+            documents: 0,
+            points: 0,
+            corrupt: Vec::new(),
+        };
         for entry in fs::read_dir(dir)? {
             let path = entry?.path();
             match path.extension().and_then(|e| e.to_str()) {
@@ -191,7 +199,11 @@ impl VectorDb {
                         inner.insert_doc(&doc, points);
                     }
                     Err(_) => {
-                        let doc = path.file_stem().and_then(|s| s.to_str()).unwrap_or_default().to_string();
+                        let doc = path
+                            .file_stem()
+                            .and_then(|s| s.to_str())
+                            .unwrap_or_default()
+                            .to_string();
                         report.corrupt.push(doc);
                         let _ = fs::remove_file(&path);
                     }
@@ -233,7 +245,10 @@ impl VectorDb {
         vectors: &[Vec<f32>],
     ) -> io::Result<()> {
         if chunks.len() != vectors.len() {
-            return Err(io::Error::new(io::ErrorKind::InvalidInput, "one vector per chunk is required"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "one vector per chunk is required",
+            ));
         }
         let pairs: Vec<(Chunk, Vec<f32>)> = chunks
             .into_iter()
@@ -244,8 +259,19 @@ impl VectorDb {
         {
             let mut inner = self.write();
             inner.remove_doc(doc);
-            inner.insert_doc(doc, pairs.into_iter().map(|(chunk, v)| Point { chunk, vector: v.into() }).collect());
-            inner.doc_case.insert(doc.to_string(), case.map(str::to_string));
+            inner.insert_doc(
+                doc,
+                pairs
+                    .into_iter()
+                    .map(|(chunk, v)| Point {
+                        chunk,
+                        vector: v.into(),
+                    })
+                    .collect(),
+            );
+            inner
+                .doc_case
+                .insert(doc.to_string(), case.map(str::to_string));
         }
         self.maintain();
         Ok(())
@@ -286,8 +312,17 @@ impl VectorDb {
 
     /// Drops every document not in `keep` (and its segment). Used at startup
     /// to discard points whose document SQLite no longer considers indexed.
-    pub fn retain_documents(self: &Arc<Self>, keep: &std::collections::HashSet<String>) -> io::Result<Vec<String>> {
-        let stale: Vec<String> = self.read().by_doc.keys().filter(|d| !keep.contains(*d)).cloned().collect();
+    pub fn retain_documents(
+        self: &Arc<Self>,
+        keep: &std::collections::HashSet<String>,
+    ) -> io::Result<Vec<String>> {
+        let stale: Vec<String> = self
+            .read()
+            .by_doc
+            .keys()
+            .filter(|d| !keep.contains(*d))
+            .cloned()
+            .collect();
         for d in &stale {
             self.remove_document(d)?;
         }
@@ -322,7 +357,11 @@ impl VectorDb {
 
     pub fn chunk(&self, id: &str) -> Option<Chunk> {
         let inner = self.read();
-        inner.by_chunk.get(id).and_then(|&s| inner.points[s].as_ref()).map(|p| p.chunk.clone())
+        inner
+            .by_chunk
+            .get(id)
+            .and_then(|&s| inner.points[s].as_ref())
+            .map(|p| p.chunk.clone())
     }
 
     /// True when a chunk is searchable (its document is fully indexed).
@@ -333,7 +372,9 @@ impl VectorDb {
 
     /// The `k` chunks most similar to `query`, best first, as (chunk id, cosine).
     pub fn search(&self, query: &[f32], k: usize, filter: Filter<'_>) -> Vec<(String, f64)> {
-        let Some(q) = normalized(query) else { return Vec::new() };
+        let Some(q) = normalized(query) else {
+            return Vec::new();
+        };
         if k == 0 {
             return Vec::new();
         }
@@ -374,11 +415,20 @@ impl VectorDb {
         }
     }
 
-    fn graph_search(&self, inner: &Inner, g: &Graph, q: &[f32], k: usize, filter: &Filter<'_>) -> Vec<(String, f64)> {
+    fn graph_search(
+        &self,
+        inner: &Inner,
+        g: &Graph,
+        q: &[f32],
+        k: usize,
+        filter: &Filter<'_>,
+    ) -> Vec<(String, f64)> {
         let ok = |slot: &usize| -> bool {
-            inner.points.get(*slot).and_then(|p| p.as_ref()).map_or(false, |p| {
-                filter.allows_doc(inner, &p.chunk.document_id)
-            })
+            inner
+                .points
+                .get(*slot)
+                .and_then(|p| p.as_ref())
+                .is_some_and(|p| filter.allows_doc(inner, &p.chunk.document_id))
         };
         let ef = (k * 8).max(96);
         let mut hits: Vec<(usize, f32)> = g
@@ -402,13 +452,17 @@ impl VectorDb {
             let inner = self.read();
             let dim = inner.main_dim();
             let big = inner.live >= GRAPH_MIN;
-            let dirty = inner.points.len() > 0
+            let dirty = !inner.points.is_empty()
                 && inner.tombstones() as f32 / inner.points.len() as f32 > TOMBSTONE_RATIO;
             match &inner.graph {
                 None => (big, false),
                 Some(g) => (
                     !big || dirty || g.dim != dim,
-                    inner.points.len().saturating_sub(g.covers.load(Ordering::Acquire)) > TAIL_MAX,
+                    inner
+                        .points
+                        .len()
+                        .saturating_sub(g.covers.load(Ordering::Acquire))
+                        > TAIL_MAX,
                 ),
             }
         };
@@ -442,7 +496,10 @@ impl VectorDb {
             for p in old.into_iter().flatten() {
                 let slot = points.len();
                 by_chunk.insert(p.chunk.id.clone(), slot);
-                by_doc.entry(p.chunk.document_id.clone()).or_default().push(slot);
+                by_doc
+                    .entry(p.chunk.document_id.clone())
+                    .or_default()
+                    .push(slot);
                 points.push(Some(p));
             }
             inner.points = points;
@@ -456,21 +513,37 @@ impl VectorDb {
                 .points
                 .iter()
                 .enumerate()
-                .filter_map(|(s, p)| p.as_ref().filter(|p| p.vector.len() == dim).map(|p| (s, Arc::clone(&p.vector))))
+                .filter_map(|(s, p)| {
+                    p.as_ref()
+                        .filter(|p| p.vector.len() == dim)
+                        .map(|p| (s, Arc::clone(&p.vector)))
+                })
                 .collect()
         };
-        let Some(dim) = snapshot.first().map(|(_, v)| v.len()) else { return };
+        let Some(dim) = snapshot.first().map(|(_, v)| v.len()) else {
+            return;
+        };
         let covers = snapshot.last().map_or(0, |(s, _)| s + 1);
 
         // 2. Build off-lock; searches keep using exact scans meanwhile.
-        let hnsw = Hnsw::<f32, UnitCosine>::new(HNSW_M, snapshot.len(), HNSW_MAX_LAYER, HNSW_EF_CONSTRUCTION, UnitCosine);
+        let hnsw = Hnsw::<f32, UnitCosine>::new(
+            HNSW_M,
+            snapshot.len(),
+            HNSW_MAX_LAYER,
+            HNSW_EF_CONSTRUCTION,
+            UnitCosine,
+        );
         let batch: Vec<(&[f32], usize)> = snapshot.iter().map(|(s, v)| (&v[..], *s)).collect();
         hnsw.parallel_insert_slice(&batch);
 
         // 3. Swap in, unless the store was compacted again meanwhile.
         let mut inner = self.write();
         if inner.points.len() >= covers {
-            inner.graph = Some(Arc::new(Graph { hnsw, covers: AtomicUsize::new(covers), dim }));
+            inner.graph = Some(Arc::new(Graph {
+                hnsw,
+                covers: AtomicUsize::new(covers),
+                dim,
+            }));
         }
     }
 
@@ -482,12 +555,17 @@ impl VectorDb {
             let from = g.covers.load(Ordering::Acquire);
             let tail: Vec<(usize, Arc<[f32]>)> = (from..inner.points.len())
                 .filter_map(|s| {
-                    inner.points[s].as_ref().filter(|p| p.vector.len() == g.dim).map(|p| (s, Arc::clone(&p.vector)))
+                    inner.points[s]
+                        .as_ref()
+                        .filter(|p| p.vector.len() == g.dim)
+                        .map(|p| (s, Arc::clone(&p.vector)))
                 })
                 .collect();
             (g, tail)
         };
-        let Some(end) = tail.last().map(|(s, _)| s + 1) else { return };
+        let Some(end) = tail.last().map(|(s, _)| s + 1) else {
+            return;
+        };
         let batch: Vec<(&[f32], usize)> = tail.iter().map(|(s, v)| (&v[..], *s)).collect();
         graph.hnsw.parallel_insert_slice(&batch);
         // Searches scan the tail exactly until this moves, so nothing is
@@ -502,9 +580,21 @@ impl VectorDb {
     }
 }
 
-fn exact_slots(inner: &Inner, q: &[f32], k: usize, slots: impl Iterator<Item = usize>) -> Vec<(usize, f32)> {
+fn exact_slots(
+    inner: &Inner,
+    q: &[f32],
+    k: usize,
+    slots: impl Iterator<Item = usize>,
+) -> Vec<(usize, f32)> {
     let mut scored: Vec<(usize, f32)> = slots
-        .filter_map(|s| inner.points.get(s)?.as_ref().filter(|p| p.vector.len() == q.len()).map(|p| (s, dot(&p.vector, q))))
+        .filter_map(|s| {
+            inner
+                .points
+                .get(s)?
+                .as_ref()
+                .filter(|p| p.vector.len() == q.len())
+                .map(|p| (s, dot(&p.vector, q)))
+        })
         .filter(|(_, score)| *score > 0.0)
         .collect();
     if scored.len() > k {
@@ -514,19 +604,30 @@ fn exact_slots(inner: &Inner, q: &[f32], k: usize, slots: impl Iterator<Item = u
     scored
 }
 
-fn exact(inner: &Inner, q: &[f32], k: usize, slots: impl Iterator<Item = usize>) -> Vec<(String, f64)> {
+fn exact(
+    inner: &Inner,
+    q: &[f32],
+    k: usize,
+    slots: impl Iterator<Item = usize>,
+) -> Vec<(String, f64)> {
     let hits = exact_slots(inner, q, k, slots);
     finish(inner, hits, k)
 }
 
 /// Dedupes, ranks (ties by chunk id, so results are deterministic), trims.
 fn finish(inner: &Inner, mut hits: Vec<(usize, f32)>, k: usize) -> Vec<(String, f64)> {
-    hits.sort_by(|a, b| a.0.cmp(&b.0));
+    hits.sort_by_key(|h| h.0);
     hits.dedup_by_key(|h| h.0);
     let mut out: Vec<(String, f64)> = hits
         .into_iter()
         .filter(|(_, s)| *s > 0.0)
-        .filter_map(|(slot, s)| inner.points.get(slot)?.as_ref().map(|p| (p.chunk.id.clone(), s as f64)))
+        .filter_map(|(slot, s)| {
+            inner
+                .points
+                .get(slot)?
+                .as_ref()
+                .map(|p| (p.chunk.id.clone(), s as f64))
+        })
         .collect();
     out.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
     out.truncate(k);
@@ -534,12 +635,26 @@ fn finish(inner: &Inner, mut hits: Vec<(usize, f32)>, k: usize) -> Vec<(String, 
 }
 
 fn to_points(chunks: Vec<(Chunk, Vec<f32>)>) -> Vec<Point> {
-    chunks.into_iter().map(|(chunk, v)| Point { chunk, vector: v.into() }).collect()
+    chunks
+        .into_iter()
+        .map(|(chunk, v)| Point {
+            chunk,
+            vector: v.into(),
+        })
+        .collect()
 }
 
 /// Document ids are UUIDs, but a file name must never escape the directory.
 fn sanitize(doc: &str) -> String {
-    doc.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' }).collect()
+    doc.chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
 }
 
 // --- Segment files -------------------------------------------------------------
@@ -562,7 +677,12 @@ const MAGIC: &[u8; 5] = b"CVSEG";
 const VERSION: u8 = 1;
 
 fn write_segment(path: &Path, doc: &str, points: &[(Chunk, Vec<f32>)]) -> io::Result<()> {
-    let mut buf: Vec<u8> = Vec::with_capacity(64 + points.iter().map(|(c, v)| c.text.len() + v.len() * 4 + 64).sum::<usize>());
+    let mut buf: Vec<u8> = Vec::with_capacity(
+        64 + points
+            .iter()
+            .map(|(c, v)| c.text.len() + v.len() * 4 + 64)
+            .sum::<usize>(),
+    );
     buf.extend_from_slice(MAGIC);
     buf.push(VERSION);
     put_str(&mut buf, doc);
@@ -594,7 +714,10 @@ fn write_segment(path: &Path, doc: &str, points: &[(Chunk, Vec<f32>)]) -> io::Re
     fs::rename(&tmp, path)
 }
 
-fn read_segment(path: &Path) -> io::Result<(String, Vec<(Chunk, Vec<f32>)>)> {
+/// A segment file's contents: its document id and each chunk with its vector.
+type Segment = (String, Vec<(Chunk, Vec<f32>)>);
+
+fn read_segment(path: &Path) -> io::Result<Segment> {
     let mut data = Vec::new();
     fs::File::open(path)?.read_to_end(&mut data)?;
     let bad = || io::Error::new(io::ErrorKind::InvalidData, "corrupt segment");
@@ -623,7 +746,12 @@ fn read_segment(path: &Path) -> io::Result<(String, Vec<(Chunk, Vec<f32>)>)> {
         let text = r.str()?;
         let dim = r.u32()? as usize;
         let raw = r.take(dim * 4)?;
-        let vector: Vec<f32> = raw.chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect();
+        let vector: Vec<f32> = raw
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|&c| f32::from_le_bytes(c))
+            .collect();
         out.push((
             Chunk {
                 id,
@@ -666,7 +794,8 @@ struct Reader<'a> {
 impl<'a> Reader<'a> {
     fn take(&mut self, n: usize) -> io::Result<&'a [u8]> {
         let end = self.at.checked_add(n).filter(|e| *e <= self.buf.len());
-        let end = end.ok_or_else(|| io::Error::new(io::ErrorKind::UnexpectedEof, "truncated segment"))?;
+        let end =
+            end.ok_or_else(|| io::Error::new(io::ErrorKind::UnexpectedEof, "truncated segment"))?;
         let s = &self.buf[self.at..end];
         self.at = end;
         Ok(s)
@@ -682,7 +811,8 @@ impl<'a> Reader<'a> {
     }
     fn str(&mut self) -> io::Result<String> {
         let n = self.u32()? as usize;
-        String::from_utf8(self.take(n)?.to_vec()).map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "bad utf-8"))
+        String::from_utf8(self.take(n)?.to_vec())
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "bad utf-8"))
     }
 }
 
@@ -700,7 +830,10 @@ mod tests {
     struct Rng(u64);
     impl Rng {
         fn next(&mut self) -> f32 {
-            self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            self.0 = self
+                .0
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             ((self.0 >> 40) as f32 / (1u64 << 24) as f32) - 0.5
         }
         fn vec(&mut self, dim: usize) -> Vec<f32> {
@@ -764,7 +897,13 @@ mod tests {
         let dir = tempdir("corrupt");
         {
             let (db, _) = VectorDb::open(&dir).unwrap();
-            db.upsert_document("d1", None, chunks("d1", 2), &[vec![1.0, 0.0], vec![0.0, 1.0]]).unwrap();
+            db.upsert_document(
+                "d1",
+                None,
+                chunks("d1", 2),
+                &[vec![1.0, 0.0], vec![0.0, 1.0]],
+            )
+            .unwrap();
         }
         let seg = dir.join("d1.seg");
         let mut bytes = fs::read(&seg).unwrap();
@@ -792,11 +931,24 @@ mod tests {
         let d2 = vec!["d2".to_string(), "d4".to_string()];
         for filter in [
             Filter::default(),
-            Filter { docs: &[], case: Some("c2") },
-            Filter { docs: &d2, case: None },
-            Filter { docs: &d2, case: Some("c1") },
+            Filter {
+                docs: &[],
+                case: Some("c2"),
+            },
+            Filter {
+                docs: &d2,
+                case: None,
+            },
+            Filter {
+                docs: &d2,
+                case: Some("c1"),
+            },
         ] {
-            let got: Vec<String> = db.search(&q, 10, filter).into_iter().map(|(id, _)| id).collect();
+            let got: Vec<String> = db
+                .search(&q, 10, filter)
+                .into_iter()
+                .map(|(id, _)| id)
+                .collect();
             assert_eq!(got, brute(&db, &q, 10, filter));
         }
         fs::remove_dir_all(&dir).ok();
@@ -806,8 +958,15 @@ mod tests {
     fn upsert_replaces_and_remove_deletes() {
         let dir = tempdir("replace");
         let (db, _) = VectorDb::open(&dir).unwrap();
-        db.upsert_document("d1", None, chunks("d1", 3), &[vec![1.0, 0.0], vec![0.0, 1.0], vec![1.0, 1.0]]).unwrap();
-        db.upsert_document("d1", None, chunks("d1", 1), &[vec![1.0, 0.0]]).unwrap();
+        db.upsert_document(
+            "d1",
+            None,
+            chunks("d1", 3),
+            &[vec![1.0, 0.0], vec![0.0, 1.0], vec![1.0, 1.0]],
+        )
+        .unwrap();
+        db.upsert_document("d1", None, chunks("d1", 1), &[vec![1.0, 0.0]])
+            .unwrap();
         assert_eq!(db.len(), 1);
         assert_eq!(db.chunk_count("d1"), 1);
         assert!(!db.contains("d1:2"));
@@ -823,10 +982,31 @@ mod tests {
     fn clearing_a_case_unfiles_its_documents() {
         let dir = tempdir("case");
         let (db, _) = VectorDb::open(&dir).unwrap();
-        db.upsert_document("d1", Some("c1"), chunks("d1", 1), &[vec![1.0, 0.0]]).unwrap();
-        assert_eq!(db.search(&[1.0, 0.0], 5, Filter { docs: &[], case: Some("c1") }).len(), 1);
+        db.upsert_document("d1", Some("c1"), chunks("d1", 1), &[vec![1.0, 0.0]])
+            .unwrap();
+        assert_eq!(
+            db.search(
+                &[1.0, 0.0],
+                5,
+                Filter {
+                    docs: &[],
+                    case: Some("c1")
+                }
+            )
+            .len(),
+            1
+        );
         db.clear_case("c1");
-        assert!(db.search(&[1.0, 0.0], 5, Filter { docs: &[], case: Some("c1") }).is_empty());
+        assert!(db
+            .search(
+                &[1.0, 0.0],
+                5,
+                Filter {
+                    docs: &[],
+                    case: Some("c1")
+                }
+            )
+            .is_empty());
         fs::remove_dir_all(&dir).ok();
     }
 
@@ -834,10 +1014,15 @@ mod tests {
     fn retain_drops_documents_sqlite_does_not_know() {
         let dir = tempdir("retain");
         let (db, _) = VectorDb::open(&dir).unwrap();
-        db.upsert_document("keep", None, chunks("keep", 1), &[vec![1.0]]).unwrap();
-        db.upsert_document("orphan", None, chunks("orphan", 1), &[vec![1.0]]).unwrap();
+        db.upsert_document("keep", None, chunks("keep", 1), &[vec![1.0]])
+            .unwrap();
+        db.upsert_document("orphan", None, chunks("orphan", 1), &[vec![1.0]])
+            .unwrap();
         let keep: HashSet<String> = ["keep".to_string()].into();
-        assert_eq!(db.retain_documents(&keep).unwrap(), vec!["orphan".to_string()]);
+        assert_eq!(
+            db.retain_documents(&keep).unwrap(),
+            vec!["orphan".to_string()]
+        );
         assert_eq!(db.documents(), vec!["keep".to_string()]);
         fs::remove_dir_all(&dir).ok();
     }
@@ -856,7 +1041,8 @@ mod tests {
             let doc = format!("doc{d}");
             let v: Vec<Vec<f32>> = (0..per_doc).map(|_| rng.vec(dim)).collect();
             let case = if d % 2 == 0 { "even" } else { "odd" };
-            db.upsert_document(&doc, Some(case), chunks(&doc, per_doc), &v).unwrap();
+            db.upsert_document(&doc, Some(case), chunks(&doc, per_doc), &v)
+                .unwrap();
         }
         // Build synchronously for the test.
         db.rebuild();
@@ -866,7 +1052,11 @@ mod tests {
         let mut total = 0usize;
         for _ in 0..20 {
             let q = rng.vec(dim);
-            let approx: HashSet<String> = db.search(&q, 10, Filter::default()).into_iter().map(|(id, _)| id).collect();
+            let approx: HashSet<String> = db
+                .search(&q, 10, Filter::default())
+                .into_iter()
+                .map(|(id, _)| id)
+                .collect();
             for id in brute(&db, &q, 10, Filter::default()) {
                 total += 1;
                 hit += approx.contains(&id) as usize;
@@ -879,18 +1069,53 @@ mod tests {
         // A case filter still covers ~half the collection, so it goes through
         // the graph — and must only return that case's chunks.
         let q = rng.vec(dim);
-        let hits = db.search(&q, 10, Filter { docs: &[], case: Some("even") });
+        let hits = db.search(
+            &q,
+            10,
+            Filter {
+                docs: &[],
+                case: Some("even"),
+            },
+        );
         assert_eq!(hits.len(), 10);
         assert!(hits.iter().all(|(id, _)| {
-            let n: usize = id.trim_start_matches("doc").split(':').next().unwrap().parse().unwrap();
-            n % 2 == 0
+            let n: usize = id
+                .trim_start_matches("doc")
+                .split(':')
+                .next()
+                .unwrap()
+                .parse()
+                .unwrap();
+            n.is_multiple_of(2)
         }));
 
         // A single @mentioned document is answered exactly.
         let one = vec!["doc3".to_string()];
         let q = rng.vec(dim);
-        let got: Vec<String> = db.search(&q, 5, Filter { docs: &one, case: None }).into_iter().map(|(id, _)| id).collect();
-        assert_eq!(got, brute(&db, &q, 5, Filter { docs: &one, case: None }));
+        let got: Vec<String> = db
+            .search(
+                &q,
+                5,
+                Filter {
+                    docs: &one,
+                    case: None,
+                },
+            )
+            .into_iter()
+            .map(|(id, _)| id)
+            .collect();
+        assert_eq!(
+            got,
+            brute(
+                &db,
+                &q,
+                5,
+                Filter {
+                    docs: &one,
+                    case: None
+                }
+            )
+        );
         fs::remove_dir_all(&dir).ok();
     }
 }

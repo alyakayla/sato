@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 
 use rusqlite::{params, Connection};
@@ -118,6 +119,7 @@ pub async fn get_settings(state: State<'_, AppState>) -> CmdResult<Settings> {
 
 #[tauri::command]
 pub async fn save_provider(
+    app: AppHandle,
     state: State<'_, AppState>,
     config: ProviderConfig,
 ) -> CmdResult<ProviderStatus> {
@@ -126,7 +128,82 @@ pub async fn save_provider(
     let client = Provider::new(config.clone())?;
     let diagnosis = client.diagnose().await;
     state.set_provider(client);
+    // A different embedding model means every stored vector is now foreign.
+    ensure_embedding_format(&app);
     provider_status(&state, &config, diagnosis)
+}
+
+/// Records how the stored vectors were produced (see `embedtext::format_id`).
+const EMBEDDING_FORMAT_KEY: &str = "embeddingFormat";
+
+static REEMBEDDING: AtomicBool = AtomicBool::new(false);
+
+/// Re-embeds every indexed document, in the background and one at a time,
+/// when the embedding model or recipe has changed since they were embedded —
+/// otherwise questions are embedded one way and passages another, and
+/// retrieval quietly degrades.
+///
+/// Waits until the provider is usable: failing every document because Ollama
+/// is not running would mark them all Failed and discard good vectors. A
+/// document that still fails mid-way is put back to Ready with its old vectors
+/// intact, and the format is left unrecorded so the next launch tries again.
+pub fn ensure_embedding_format(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    let current = crate::embedtext::format_id(&state.provider().config().embedding_model);
+    let stored = db::get_setting(&state.db(), EMBEDDING_FORMAT_KEY)
+        .ok()
+        .flatten();
+    if stored.as_deref() == Some(current.as_str()) {
+        return;
+    }
+    let ready: Vec<String> = {
+        let conn = state.db();
+        let mut stmt = match conn.prepare("SELECT id FROM documents WHERE index_status = 'Ready'") {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+        let rows = stmt.query_map([], |r| r.get::<_, String>(0));
+        match rows {
+            Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
+            Err(_) => return,
+        }
+    };
+    if ready.is_empty() {
+        // Nothing embedded yet: whatever is indexed next uses the current format.
+        let _ = db::set_setting(&state.db(), EMBEDDING_FORMAT_KEY, &current);
+        return;
+    }
+    if REEMBEDDING.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    let app = app.clone();
+    let lock = state.index_lock();
+    tauri::async_runtime::spawn(async move {
+        let provider = app.state::<AppState>().provider();
+        if provider.diagnose().await.ok {
+            let mut all_ok = true;
+            for id in &ready {
+                let _guard = lock.lock().await;
+                if index_document(&app, id).await.is_err() {
+                    all_ok = false;
+                    // The old vectors are still in the store; keep serving them.
+                    let _ = app.state::<AppState>().db().execute(
+                        "UPDATE documents SET index_status = 'Ready', index_error = NULL WHERE id = ?1",
+                        [id],
+                    );
+                }
+            }
+            if all_ok {
+                let _ = db::set_setting(
+                    &app.state::<AppState>().db(),
+                    EMBEDDING_FORMAT_KEY,
+                    &current,
+                );
+            }
+            let _ = app.emit("documents:changed", serde_json::json!({}));
+        }
+        REEMBEDDING.store(false, Ordering::Release);
+    });
 }
 
 fn provider_status(
@@ -138,7 +215,11 @@ fn provider_status(
     Ok(ProviderStatus {
         name: cfg.kind.clone(),
         configured: d.ok,
-        detail: if d.ok { format!("connected to {} ({})", cfg.base_url, cfg.chat_model) } else { d.detail },
+        detail: if d.ok {
+            format!("connected to {} ({})", cfg.base_url, cfg.chat_model)
+        } else {
+            d.detail
+        },
         embedding_dim,
         problem: d.problem,
         missing_models: d.missing_models,
@@ -196,15 +277,20 @@ pub async fn dashboard(state: State<'_, AppState>) -> CmdResult<DashboardStats> 
               ORDER BY d.created_at DESC LIMIT 8",
         )?;
         let rows = stmt.query_map([], map_document)?;
-        with_chunk_counts(&state.vectors, rows.collect::<std::result::Result<Vec<_>, _>>()?)
+        with_chunk_counts(
+            &state.vectors,
+            rows.collect::<std::result::Result<Vec<_>, _>>()?,
+        )
     };
 
     let cases_by_status = {
-        let mut stmt = conn.prepare(
-            "SELECT status, COUNT(*) FROM cases GROUP BY status ORDER BY COUNT(*) DESC",
-        )?;
+        let mut stmt = conn
+            .prepare("SELECT status, COUNT(*) FROM cases GROUP BY status ORDER BY COUNT(*) DESC")?;
         let rows = stmt.query_map([], |r| {
-            Ok(StatusCount { status: r.get(0)?, count: r.get(1)? })
+            Ok(StatusCount {
+                status: r.get(0)?,
+                count: r.get(1)?,
+            })
         })?;
         rows.collect::<std::result::Result<Vec<_>, _>>()?
     };
@@ -219,7 +305,11 @@ pub async fn dashboard(state: State<'_, AppState>) -> CmdResult<DashboardStats> 
               ORDER BY COUNT(c.id) DESC",
         )?;
         let rows = stmt.query_map([], |r| {
-            Ok(CategoryCount { name: r.get(0)?, color: r.get(1)?, count: r.get(2)? })
+            Ok(CategoryCount {
+                name: r.get(0)?,
+                color: r.get(1)?,
+                count: r.get(2)?,
+            })
         })?;
         rows.collect::<std::result::Result<Vec<_>, _>>()?
     };
@@ -262,7 +352,8 @@ pub async fn list_categories(state: State<'_, AppState>) -> CmdResult<Vec<Catego
             case_count: r.get(6)?,
         })
     })?;
-    rows.collect::<std::result::Result<Vec<_>, _>>().map_err(Error::from)
+    rows.collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(Error::from)
 }
 
 #[tauri::command]
@@ -314,7 +405,9 @@ pub async fn save_category(
 #[tauri::command]
 pub async fn delete_category(state: State<'_, AppState>, id: String) -> CmdResult<()> {
     // Cases keep existing with a null category thanks to ON DELETE SET NULL.
-    state.db().execute("DELETE FROM categories WHERE id = ?1", [id])?;
+    state
+        .db()
+        .execute("DELETE FROM categories WHERE id = ?1", [id])?;
     Ok(())
 }
 
@@ -341,7 +434,8 @@ fn map_case(r: &rusqlite::Row) -> rusqlite::Result<Case> {
     })
 }
 
-const CASE_SELECT: &str = "SELECT c.id, c.reference, c.title, c.category_id, c.status, c.description,
+const CASE_SELECT: &str =
+    "SELECT c.id, c.reference, c.title, c.category_id, c.status, c.description,
             c.opened_at, c.closed_at, c.created_at, c.updated_at, cat.name, cat.color,
             (SELECT COUNT(*) FROM documents d WHERE d.case_id = c.id),
             (SELECT COUNT(*) FROM case_people cp WHERE cp.case_id = c.id)
@@ -358,7 +452,10 @@ pub struct CaseFilter {
 }
 
 #[tauri::command]
-pub async fn list_cases(state: State<'_, AppState>, filter: Option<CaseFilter>) -> CmdResult<Vec<Case>> {
+pub async fn list_cases(
+    state: State<'_, AppState>,
+    filter: Option<CaseFilter>,
+) -> CmdResult<Vec<Case>> {
     let filter = filter.unwrap_or_default();
     let mut sql = CASE_SELECT.to_string();
     let mut binds: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
@@ -371,7 +468,12 @@ pub async fn list_cases(state: State<'_, AppState>, filter: Option<CaseFilter>) 
             sql.push_str(" AND c.status = ?");
             binds.push(Box::new(status.clone()));
         }
-        if let Some(term) = filter.search.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty()) {
+        if let Some(term) = filter
+            .search
+            .as_ref()
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+        {
             sql.push_str(" AND (c.title LIKE ? OR c.reference LIKE ? OR c.description LIKE ?)");
             let like = format!("%{term}%");
             binds.push(Box::new(like.clone()));
@@ -386,7 +488,8 @@ pub async fn list_cases(state: State<'_, AppState>, filter: Option<CaseFilter>) 
     let mut stmt = conn.prepare(&sql)?;
     let refs: Vec<&dyn rusqlite::ToSql> = binds.iter().map(|b| b.as_ref()).collect();
     let rows = stmt.query_map(refs.as_slice(), map_case)?;
-    rows.collect::<std::result::Result<Vec<_>, _>>().map_err(Error::from)
+    rows.collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(Error::from)
 }
 
 #[tauri::command]
@@ -429,7 +532,12 @@ fn upsert_case(conn: &Connection, input: CaseInput) -> CmdResult<Case> {
     let ts = now();
 
     // Auto-assign a reference like "2026-CV-0042" when the user leaves it blank.
-    let reference = match input.reference.as_ref().map(|r| r.trim()).filter(|r| !r.is_empty()) {
+    let reference = match input
+        .reference
+        .as_ref()
+        .map(|r| r.trim())
+        .filter(|r| !r.is_empty())
+    {
         Some(r) => r.to_string(),
         None => next_reference(conn)?,
     };
@@ -456,7 +564,16 @@ fn upsert_case(conn: &Connection, input: CaseInput) -> CmdResult<Case> {
            updated_at = excluded.updated_at",
         // ?8 is "now", used for both created_at and updated_at on insert; an
         // update keeps the original created_at and only refreshes updated_at.
-        params![id, reference, title, input.category_id, status, input.description, opened, ts],
+        params![
+            id,
+            reference,
+            title,
+            input.category_id,
+            status,
+            input.description,
+            opened,
+            ts
+        ],
     )?;
     get_case_inner(conn, &id)
 }
@@ -491,7 +608,10 @@ mod case_tests {
         let case = upsert_case(&conn, full).expect("insert with all fields");
         assert_eq!(case.reference, "case-01");
         assert_eq!(case.category_id.as_deref(), Some("cat1"));
-        assert_eq!(case.description.as_deref(), Some("Breach of a supply contract"));
+        assert_eq!(
+            case.description.as_deref(),
+            Some("Breach of a supply contract")
+        );
         assert_eq!(case.opened_at, "2026-09-01T00:00:00Z");
         // Timestamps are "now", not the opened date.
         assert_ne!(case.created_at, case.opened_at);
@@ -567,7 +687,9 @@ fn next_reference(conn: &Connection) -> Result<String> {
 pub async fn delete_case(state: State<'_, AppState>, id: String) -> CmdResult<()> {
     // Documents and spreadsheet rows survive; their case_id is nulled by the
     // schema so nothing a lawyer uploaded is silently destroyed.
-    state.db().execute("DELETE FROM cases WHERE id = ?1", [&id])?;
+    state
+        .db()
+        .execute("DELETE FROM cases WHERE id = ?1", [&id])?;
     // Its documents are now unfiled, so case-scoped search must not find them.
     state.vectors.clear_case(&id);
     Ok(())
@@ -597,7 +719,10 @@ const PERSON_SELECT: &str = "SELECT p.id, p.full_name, p.role, p.organization, p
        FROM people p";
 
 #[tauri::command]
-pub async fn list_people(state: State<'_, AppState>, search: Option<String>) -> CmdResult<Vec<Person>> {
+pub async fn list_people(
+    state: State<'_, AppState>,
+    search: Option<String>,
+) -> CmdResult<Vec<Person>> {
     let mut sql = PERSON_SELECT.to_string();
     let mut binds: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
     if let Some(term) = search.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty()) {
@@ -610,9 +735,12 @@ pub async fn list_people(state: State<'_, AppState>, search: Option<String>) -> 
     let mut stmt = conn.prepare(&sql)?;
     let refs: Vec<&dyn rusqlite::ToSql> = binds.iter().map(|b| b.as_ref()).collect();
     let rows = stmt.query_map(refs.as_slice(), map_person)?;
-    rows.collect::<std::result::Result<Vec<_>, _>>().map_err(Error::from)
+    rows.collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(Error::from)
 }
 
+// Each argument is a named field the frontend sends; a struct would only rename them.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn save_person(
     state: State<'_, AppState>,
@@ -653,12 +781,17 @@ pub async fn save_person(
     )?;
 
     let sql = format!("{PERSON_SELECT} WHERE p.id = ?1");
-    state.db().query_row(&sql, [&id], map_person).map_err(Error::from)
+    state
+        .db()
+        .query_row(&sql, [&id], map_person)
+        .map_err(Error::from)
 }
 
 #[tauri::command]
 pub async fn delete_person(state: State<'_, AppState>, id: String) -> CmdResult<()> {
-    state.db().execute("DELETE FROM people WHERE id = ?1", [id])?;
+    state
+        .db()
+        .execute("DELETE FROM people WHERE id = ?1", [id])?;
     Ok(())
 }
 
@@ -691,7 +824,11 @@ pub async fn case_roster(state: State<'_, AppState>, case_id: String) -> CmdResu
         let role_in_case: String = r.get(9)?;
         let person_id = person.id.clone();
         Ok(RosterEntry {
-            link: CasePerson { person_id, case_id: case_id.clone(), role_in_case },
+            link: CasePerson {
+                person_id,
+                case_id: case_id.clone(),
+                role_in_case,
+            },
             person,
         })
     })?;
@@ -715,7 +852,11 @@ pub async fn link_person(
 }
 
 #[tauri::command]
-pub async fn unlink_person(state: State<'_, AppState>, case_id: String, person_id: String) -> CmdResult<()> {
+pub async fn unlink_person(
+    state: State<'_, AppState>,
+    case_id: String,
+    person_id: String,
+) -> CmdResult<()> {
     state.db().execute(
         "DELETE FROM case_people WHERE case_id = ?1 AND person_id = ?2",
         params![case_id, person_id],
@@ -748,7 +889,8 @@ fn map_document(r: &rusqlite::Row) -> rusqlite::Result<Document> {
     })
 }
 
-const DOC_SELECT: &str = "SELECT d.id, d.case_id, d.file_name, d.source_path, d.stored_path, d.mime,
+const DOC_SELECT: &str =
+    "SELECT d.id, d.case_id, d.file_name, d.source_path, d.stored_path, d.mime,
             d.size_bytes, d.checksum, d.page_count, d.word_count, d.index_status, d.index_error,
             d.created_at,
             0,
@@ -796,17 +938,22 @@ pub async fn list_documents(
     let mut stmt = conn.prepare(&sql)?;
     let refs: Vec<&dyn rusqlite::ToSql> = binds.iter().map(|b| b.as_ref()).collect();
     let rows = stmt.query_map(refs.as_slice(), map_document)?;
-    let docs = rows.collect::<std::result::Result<Vec<_>, _>>().map_err(Error::from)?;
+    let docs = rows
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(Error::from)?;
     Ok(with_chunk_counts(&state.vectors, docs))
 }
 
 #[tauri::command]
 pub async fn get_document(state: State<'_, AppState>, id: String) -> CmdResult<Document> {
     let sql = format!("{DOC_SELECT} WHERE d.id = ?1");
-    let mut doc = state.db().query_row(&sql, [&id], map_document).map_err(|e| match e {
-        rusqlite::Error::QueryReturnedNoRows => Error::Message("Document not found".into()),
-        other => Error::from(other),
-    })?;
+    let mut doc = state
+        .db()
+        .query_row(&sql, [&id], map_document)
+        .map_err(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => Error::Message("Document not found".into()),
+            other => Error::from(other),
+        })?;
     doc.chunk_count = state.vectors.chunk_count(&doc.id) as i64;
     Ok(doc)
 }
@@ -942,13 +1089,20 @@ fn sanitize(p: &std::path::Path) -> String {
         .and_then(|s| s.to_str())
         .unwrap_or("file")
         .chars()
-        .map(|c| if c.is_alphanumeric() || c == '.' || c == '-' || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '.' || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect()
 }
 
 pub fn get_document_inner(conn: &Connection, id: &str) -> CmdResult<Document> {
     let sql = format!("{DOC_SELECT} WHERE d.id = ?1");
-    conn.query_row(&sql, [id], map_document).map_err(Error::from)
+    conn.query_row(&sql, [id], map_document)
+        .map_err(Error::from)
 }
 
 fn mark_failed(conn: &Connection, id: &str, err: &str) -> Result<()> {
@@ -993,25 +1147,49 @@ pub async fn index_document(app: &AppHandle, document_id: &str) -> Result<()> {
         ));
     }
 
+    let chunks = chunk::chunk_extracted(&extracted, document_id);
     let pages: Vec<String> = extracted.pages.unwrap_or_default();
-    let chunks = chunk::chunk_text(&pages, document_id);
     if chunks.is_empty() {
-        return Err(Error::Message("Document produced no indexable chunks".into()));
+        return Err(Error::Message(
+            "Document produced no indexable chunks".into(),
+        ));
     }
 
     let word_count = text.split_whitespace().count() as i64;
-    let page_count = if pages.is_empty() { None } else { Some(pages.len() as i64) };
+    let page_count = if pages.is_empty() {
+        None
+    } else {
+        Some(pages.len() as i64)
+    };
 
     // 2. Embed in batches, reporting progress as we go.
     emit_progress(app, &doc, "Embedding", 0, chunks.len() as i64);
     let mut vectors: Vec<Vec<f32>> = Vec::with_capacity(chunks.len());
     let batch_size = 24usize;
+    let model = provider.config().embedding_model.clone();
     for (batch_idx, batch) in chunks.chunks(batch_size).enumerate() {
-        let inputs: Vec<String> = batch.iter().map(|c| c.text.clone()).collect();
+        // What is embedded carries the model's task prefix and the passage's
+        // context (case, file, page); what is stored and cited stays the bare
+        // passage. See embedtext.rs.
+        let inputs: Vec<String> = batch
+            .iter()
+            .map(|c| {
+                crate::embedtext::document_input(
+                    &model,
+                    c,
+                    doc.case_reference.as_deref(),
+                    &doc.file_name,
+                )
+            })
+            .collect();
         let embedded = provider.embed(&inputs).await?;
         if let Some(first) = embedded.first() {
             let dim = first.len() as i64;
-            db::set_setting(&app.state::<AppState>().db(), "embeddingDim", &dim.to_string())?;
+            db::set_setting(
+                &app.state::<AppState>().db(),
+                "embeddingDim",
+                &dim.to_string(),
+            )?;
         }
         vectors.extend(embedded);
 
@@ -1025,13 +1203,18 @@ pub async fn index_document(app: &AppHandle, document_id: &str) -> Result<()> {
     //    which startup reconciliation removes.
     {
         let state = app.state::<AppState>();
-        let fts_rows: Vec<(String, String)> = chunks.iter().map(|c| (c.id.clone(), c.text.clone())).collect();
+        let fts_rows: Vec<(String, String)> = chunks
+            .iter()
+            .map(|c| (c.id.clone(), c.text.clone()))
+            .collect();
         let vdb = Arc::clone(&state.vectors);
         let doc_id = document_id.to_string();
         let case_id = doc.case_id.clone();
-        tokio::task::spawn_blocking(move || vdb.upsert_document(&doc_id, case_id.as_deref(), chunks, &vectors))
-            .await
-            .map_err(|e| Error::Message(format!("vector store task failed: {e}")))??;
+        tokio::task::spawn_blocking(move || {
+            vdb.upsert_document(&doc_id, case_id.as_deref(), chunks, &vectors)
+        })
+        .await
+        .map_err(|e| Error::Message(format!("vector store task failed: {e}")))??;
 
         let mut conn = state.db();
         let tx = conn.transaction().map_err(Error::from)?;
@@ -1039,9 +1222,14 @@ pub async fn index_document(app: &AppHandle, document_id: &str) -> Result<()> {
             "UPDATE documents SET word_count = ?2, page_count = ?3 WHERE id = ?1",
             params![document_id, word_count, page_count],
         )?;
-        tx.execute("DELETE FROM passages_fts WHERE document_id = ?1", [document_id])?;
+        tx.execute(
+            "DELETE FROM passages_fts WHERE document_id = ?1",
+            [document_id],
+        )?;
         {
-            let mut fts = tx.prepare("INSERT INTO passages_fts (body, chunk_id, document_id) VALUES (?1, ?2, ?3)")?;
+            let mut fts = tx.prepare(
+                "INSERT INTO passages_fts (body, chunk_id, document_id) VALUES (?1, ?2, ?3)",
+            )?;
             for (id, text) in &fts_rows {
                 fts.execute(params![text, id, document_id])?;
             }
@@ -1054,7 +1242,10 @@ pub async fn index_document(app: &AppHandle, document_id: &str) -> Result<()> {
     }
     let chunk_total = state_chunk_count(app, document_id);
     emit_progress(app, &doc, "Complete", chunk_total, chunk_total);
-    let _ = app.emit("documents:changed", serde_json::json!({ "documentId": document_id }));
+    let _ = app.emit(
+        "documents:changed",
+        serde_json::json!({ "documentId": document_id }),
+    );
     Ok(())
 }
 
@@ -1067,13 +1258,21 @@ fn emit_progress(app: &AppHandle, doc: &Document, stage: &str, done: i64, total:
             stage: stage.to_string(),
             chunks_done: done,
             chunks_total: total,
-            status: if stage == "Complete" { "Ready".into() } else { "Indexing".into() },
+            status: if stage == "Complete" {
+                "Ready".into()
+            } else {
+                "Indexing".into()
+            },
         },
     );
 }
 
 #[tauri::command]
-pub async fn reindex_document(app: AppHandle, state: State<'_, AppState>, id: String) -> CmdResult<()> {
+pub async fn reindex_document(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+) -> CmdResult<()> {
     let _ = &state;
     index_document(&app, &id).await
 }
@@ -1090,7 +1289,9 @@ pub async fn delete_document(state: State<'_, AppState>, id: String) -> CmdResul
     }
     // The passages go with the row (see the `passages_fts_document_delete`
     // trigger); the vector database drops the document's segment.
-    state.db().execute("DELETE FROM documents WHERE id = ?1", [&id])?;
+    state
+        .db()
+        .execute("DELETE FROM documents WHERE id = ?1", [&id])?;
     state.vectors.remove_document(&id)?;
     Ok(())
 }
@@ -1121,7 +1322,10 @@ pub async fn read_document_text(state: State<'_, AppState>, id: String) -> CmdRe
 // ---------------------------------------------------------------------------
 
 #[tauri::command]
-pub async fn list_conversations(state: State<'_, AppState>, case_id: Option<String>) -> CmdResult<Vec<Conversation>> {
+pub async fn list_conversations(
+    state: State<'_, AppState>,
+    case_id: Option<String>,
+) -> CmdResult<Vec<Conversation>> {
     let mut sql = String::from(
         "SELECT cv.id, cv.title, cv.case_id, cv.created_at, cv.updated_at,
                 (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = cv.id)
@@ -1147,7 +1351,8 @@ pub async fn list_conversations(state: State<'_, AppState>, case_id: Option<Stri
             message_count: r.get(5)?,
         })
     })?;
-    rows.collect::<std::result::Result<Vec<_>, _>>().map_err(Error::from)
+    rows.collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(Error::from)
 }
 
 #[tauri::command]
@@ -1179,7 +1384,9 @@ pub async fn create_conversation(
 
 #[tauri::command]
 pub async fn delete_conversation(state: State<'_, AppState>, id: String) -> CmdResult<()> {
-    state.db().execute("DELETE FROM conversations WHERE id = ?1", [id])?;
+    state
+        .db()
+        .execute("DELETE FROM conversations WHERE id = ?1", [id])?;
     Ok(())
 }
 
@@ -1200,12 +1407,16 @@ const MSG_SELECT: &str = "SELECT id, conversation_id, role, content, citations, 
        FROM messages";
 
 #[tauri::command]
-pub async fn list_messages(state: State<'_, AppState>, conversation_id: String) -> CmdResult<Vec<Message>> {
+pub async fn list_messages(
+    state: State<'_, AppState>,
+    conversation_id: String,
+) -> CmdResult<Vec<Message>> {
     let sql = format!("{MSG_SELECT} WHERE conversation_id = ?1 ORDER BY created_at, rowid");
     let conn = state.db();
     let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map([&conversation_id], map_message)?;
-    rows.collect::<std::result::Result<Vec<_>, _>>().map_err(Error::from)
+    rows.collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(Error::from)
 }
 
 /// How many prior messages the model sees. Six exchanges keeps follow-up
@@ -1319,7 +1530,8 @@ pub async fn send_message(
     // Without an embedding the question can still be answered from keyword
     // matches, so a failure here degrades retrieval instead of ending the
     // turn. The panel is told why, so it can say so.
-    let query_vector = match provider.embed(&[content.clone()]).await {
+    let query_input = crate::embedtext::query_input(&provider.config().embedding_model, &content);
+    let query_vector = match provider.embed(&[query_input]).await {
         Ok(v) => v.into_iter().next().unwrap_or_default(),
         Err(e) => {
             let problem = crate::providers::classify(&e);
@@ -1367,7 +1579,13 @@ pub async fn send_message(
         // Counts, not a sentence: the panel words it in the user's language.
         let docs: std::collections::HashSet<&str> =
             hits.iter().map(|h| h.chunk.document_id.as_str()).collect();
-        emit_step(&app, &conversation_id, "search", "done", Some((hits.len(), docs.len())));
+        emit_step(
+            &app,
+            &conversation_id,
+            "search",
+            "done",
+            Some((hits.len(), docs.len())),
+        );
     }
 
     let mut context_blocks: Vec<String> = Vec::new();
@@ -1485,7 +1703,10 @@ pub async fn send_message(
     )?;
 
     let sql = format!("{MSG_SELECT} WHERE id = ?1");
-    let msg = state.db().query_row(&sql, [&msg_id], map_message).map_err(Error::from)?;
+    let msg = state
+        .db()
+        .query_row(&sql, [&msg_id], map_message)
+        .map_err(Error::from)?;
     let _ = app.emit("chat:reply", &msg);
     Ok(msg)
 }
@@ -1532,7 +1753,10 @@ fn persist_failed_reply(
         params![conversation_id, ts],
     )?;
     let sql = format!("{MSG_SELECT} WHERE id = ?1");
-    state.db().query_row(&sql, [&id], map_message).map_err(Error::from)
+    state
+        .db()
+        .query_row(&sql, [&id], map_message)
+        .map_err(Error::from)
 }
 
 fn snippet(text: &str, max: usize) -> String {
@@ -1555,7 +1779,11 @@ pub async fn search_documents(
     let limit = limit.unwrap_or(10).clamp(1, 50) as usize;
     let conn = state.reader();
     let hits = crate::search::keyword_search(&conn, &query, limit, case_id.as_deref(), &[])?;
-    let max = hits.first().map(|(_, s)| *s).unwrap_or(1.0).max(f64::EPSILON);
+    let max = hits
+        .first()
+        .map(|(_, s)| *s)
+        .unwrap_or(1.0)
+        .max(f64::EPSILON);
     let mut out = Vec::with_capacity(hits.len());
     for (chunk_id, score) in hits {
         if let Some(hit) = crate::search::hydrate(&conn, &state.vectors, &chunk_id, score / max)? {
@@ -1589,7 +1817,10 @@ fn map_spreadsheet(r: &rusqlite::Row) -> rusqlite::Result<Spreadsheet> {
 }
 
 #[tauri::command]
-pub async fn list_spreadsheets(state: State<'_, AppState>, case_id: Option<String>) -> CmdResult<Vec<Spreadsheet>> {
+pub async fn list_spreadsheets(
+    state: State<'_, AppState>,
+    case_id: Option<String>,
+) -> CmdResult<Vec<Spreadsheet>> {
     let mut sql = format!("{SHEET_SELECT} WHERE 1 = 1");
     let mut binds: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
     if let Some(c) = &case_id {
@@ -1602,18 +1833,18 @@ pub async fn list_spreadsheets(state: State<'_, AppState>, case_id: Option<Strin
     let mut stmt = conn.prepare(&sql)?;
     let refs: Vec<&dyn rusqlite::ToSql> = binds.iter().map(|b| b.as_ref()).collect();
     let rows = stmt.query_map(refs.as_slice(), map_spreadsheet)?;
-    rows.collect::<std::result::Result<Vec<_>, _>>().map_err(Error::from)
+    rows.collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(Error::from)
 }
 
 #[tauri::command]
 pub async fn get_spreadsheet(state: State<'_, AppState>, id: String) -> CmdResult<Spreadsheet> {
     let conn = state.db();
     let mut stmt = conn.prepare(&format!("{SHEET_SELECT} WHERE s.id = ?1"))?;
-    stmt.query_row([&id], map_spreadsheet)
-        .map_err(|e| match e {
-            rusqlite::Error::QueryReturnedNoRows => Error::Message("Spreadsheet not found".into()),
-            other => Error::from(other),
-        })
+    stmt.query_row([&id], map_spreadsheet).map_err(|e| match e {
+        rusqlite::Error::QueryReturnedNoRows => Error::Message("Spreadsheet not found".into()),
+        other => Error::from(other),
+    })
 }
 
 #[tauri::command]
@@ -1669,9 +1900,8 @@ pub async fn save_spreadsheet(
     cols: Option<i64>,
 ) -> CmdResult<()> {
     // Reject a malformed payload rather than persisting it.
-    serde_json::from_str::<serde_json::Value>(&data).map_err(|e| {
-        Error::Message(format!("Invalid cell data: {e}"))
-    })?;
+    serde_json::from_str::<serde_json::Value>(&data)
+        .map_err(|e| Error::Message(format!("Invalid cell data: {e}")))?;
     state.db().execute(
         "UPDATE spreadsheets SET name = COALESCE(?2, name), data = ?3,
                 rows = COALESCE(?4, rows), cols = COALESCE(?5, cols), updated_at = ?6
@@ -1683,7 +1913,9 @@ pub async fn save_spreadsheet(
 
 #[tauri::command]
 pub async fn delete_spreadsheet(state: State<'_, AppState>, id: String) -> CmdResult<()> {
-    state.db().execute("DELETE FROM spreadsheets WHERE id = ?1", [id])?;
+    state
+        .db()
+        .execute("DELETE FROM spreadsheets WHERE id = ?1", [id])?;
     Ok(())
 }
 
@@ -1759,7 +1991,8 @@ pub async fn list_events(
     let mut stmt = conn.prepare(&sql)?;
     let refs: Vec<&dyn rusqlite::ToSql> = binds.iter().map(|b| b.as_ref()).collect();
     let rows = stmt.query_map(refs.as_slice(), map_event)?;
-    rows.collect::<std::result::Result<Vec<_>, _>>().map_err(Error::from)
+    rows.collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(Error::from)
 }
 
 #[tauri::command]
@@ -1827,7 +2060,9 @@ pub async fn save_event(state: State<'_, AppState>, input: EventInput) -> CmdRes
 
 #[tauri::command]
 pub async fn delete_event(state: State<'_, AppState>, id: String) -> CmdResult<()> {
-    state.db().execute("DELETE FROM events WHERE id = ?1", [id])?;
+    state
+        .db()
+        .execute("DELETE FROM events WHERE id = ?1", [id])?;
     Ok(())
 }
 
@@ -1890,7 +2125,11 @@ fn build_case_tree(conn: &Connection) -> Result<CaseTree> {
             id: format!("document:{}", d.id),
             node_key: match (&d.case_reference, parent.is_some()) {
                 (Some(reference), true) => {
-                    format!("{}/{}", reference.to_lowercase(), d.file_name.to_lowercase())
+                    format!(
+                        "{}/{}",
+                        reference.to_lowercase(),
+                        d.file_name.to_lowercase()
+                    )
                 }
                 _ => d.file_name.to_lowercase(),
             },
@@ -1948,7 +2187,11 @@ fn build_case_tree(conn: &Connection) -> Result<CaseTree> {
             parent_id: Some(format!("case:{case_id}")),
             depth: 1,
             ordinal: nodes.len() as i64,
-            status: Some(if role_in_case.is_empty() { role } else { role_in_case }),
+            status: Some(if role_in_case.is_empty() {
+                role
+            } else {
+                role_in_case
+            }),
             detail: Some(organization).filter(|s| !s.is_empty()),
             color: None,
             case_id: Some(case_id),
@@ -2025,7 +2268,10 @@ fn build_case_tree(conn: &Connection) -> Result<CaseTree> {
         });
     }
 
-    Ok(CaseTree { nodes, generated_at: now() })
+    Ok(CaseTree {
+        nodes,
+        generated_at: now(),
+    })
 }
 
 #[cfg(test)]
@@ -2172,8 +2418,9 @@ mod tree_tests {
 
 /// Creates a small set of starter categories so a new install is not empty.
 pub fn seed_defaults(conn: &Connection) -> Result<()> {
-    let existing: i64 =
-        conn.query_row("SELECT COUNT(*) FROM categories", [], |r| r.get(0)).unwrap_or(0);
+    let existing: i64 = conn
+        .query_row("SELECT COUNT(*) FROM categories", [], |r| r.get(0))
+        .unwrap_or(0);
     if existing > 0 {
         return Ok(());
     }
@@ -2204,7 +2451,8 @@ fn migrate_legacy_chunks(conn: &Connection, vectors: &Arc<VectorDb>) -> Result<u
     }
     let has_embeddings = db::table_exists(conn, "embeddings")?;
     let docs: Vec<(String, Option<String>)> = {
-        let mut stmt = conn.prepare("SELECT id, case_id FROM documents WHERE index_status = 'Ready'")?;
+        let mut stmt =
+            conn.prepare("SELECT id, case_id FROM documents WHERE index_status = 'Ready'")?;
         let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
         rows.collect::<std::result::Result<_, _>>()?
     };
@@ -2234,7 +2482,13 @@ fn migrate_legacy_chunks(conn: &Connection, vectors: &Arc<VectorDb>) -> Result<u
                 token_estimate: r.get(6)?,
             });
             let blob: Vec<u8> = r.get(7)?;
-            vecs.push(blob.chunks_exact(4).map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]])).collect::<Vec<f32>>());
+            vecs.push(
+                blob.as_chunks::<4>()
+                    .0
+                    .iter()
+                    .map(|&b| f32::from_le_bytes(b))
+                    .collect::<Vec<f32>>(),
+            );
         }
         if chunks.is_empty() {
             continue;
@@ -2273,8 +2527,16 @@ fn reconcile_vectors(conn: &Connection, vectors: &Arc<VectorDb>, corrupt: &[Stri
     vectors.retain_documents(&ready)?;
 
     let present: std::collections::HashSet<String> = vectors.documents().into_iter().collect();
-    for doc in ready.iter().filter(|d| !present.contains(*d)).chain(corrupt.iter()) {
-        mark_failed(conn, doc, "Search data for this document is missing or damaged. Reindex it to search it again.")?;
+    for doc in ready
+        .iter()
+        .filter(|d| !present.contains(*d))
+        .chain(corrupt.iter())
+    {
+        mark_failed(
+            conn,
+            doc,
+            "Search data for this document is missing or damaged. Reindex it to search it again.",
+        )?;
         conn.execute("DELETE FROM passages_fts WHERE document_id = ?1", [doc])?;
     }
 
@@ -2313,6 +2575,7 @@ pub fn init(app: &AppHandle) -> Result<()> {
         data_dir,
         index_lock: Arc::new(tokio::sync::Mutex::new(())),
     });
+    ensure_embedding_format(app);
     Ok(())
 }
 
@@ -2344,8 +2607,18 @@ mod vector_migration_tests {
         )
         .unwrap();
         for (id, doc, ord, text) in [
-            ("d1:0", "d1", 0, "The lessee shall give notice of termination."),
-            ("d1:1", "d1", 1, "Termination takes effect after sixty days."),
+            (
+                "d1:0",
+                "d1",
+                0,
+                "The lessee shall give notice of termination.",
+            ),
+            (
+                "d1:1",
+                "d1",
+                1,
+                "Termination takes effect after sixty days.",
+            ),
             ("d2:0", "d2", 0, "Unreadable scan."),
         ] {
             conn.execute(
@@ -2359,8 +2632,11 @@ mod vector_migration_tests {
                 rusqlite::params![id, doc, vec_to_blob(&[ord as f32 + 1.0, 0.5, 0.25])],
             )
             .unwrap();
-            conn.execute("INSERT INTO chunks_fts (body, chunk_id) VALUES (?1, ?2)", rusqlite::params![text, id])
-                .unwrap();
+            conn.execute(
+                "INSERT INTO chunks_fts (body, chunk_id) VALUES (?1, ?2)",
+                rusqlite::params![text, id],
+            )
+            .unwrap();
         }
         conn
     }
@@ -2371,7 +2647,11 @@ mod vector_migration_tests {
         let dir = tempdir("move");
         let (vdb, _) = VectorDb::open(&dir).unwrap();
 
-        assert_eq!(migrate_legacy_chunks(&conn, &vdb).unwrap(), 1, "only the Ready document moves");
+        assert_eq!(
+            migrate_legacy_chunks(&conn, &vdb).unwrap(),
+            1,
+            "only the Ready document moves"
+        );
         assert_eq!(vdb.chunk_count("d1"), 2);
         assert_eq!(vdb.chunk_count("d2"), 0);
         let chunks = vdb.chunks_of("d1");
@@ -2379,7 +2659,10 @@ mod vector_migration_tests {
         assert_eq!(chunks[0].page, Some(1));
 
         for t in ["chunks", "embeddings", "chunks_fts"] {
-            assert!(!db::table_exists(&conn, t).unwrap(), "{t} should be dropped");
+            assert!(
+                !db::table_exists(&conn, t).unwrap(),
+                "{t} should be dropped"
+            );
         }
         let passages: Vec<(String, String)> = conn
             .prepare("SELECT chunk_id, document_id FROM passages_fts WHERE passages_fts MATCH 'termination' ORDER BY chunk_id")
@@ -2388,7 +2671,10 @@ mod vector_migration_tests {
             .unwrap()
             .map(|r| r.unwrap())
             .collect();
-        assert_eq!(passages, vec![("d1:0".into(), "d1".into()), ("d1:1".into(), "d1".into())]);
+        assert_eq!(
+            passages,
+            vec![("d1:0".into(), "d1".into()), ("d1:1".into(), "d1".into())]
+        );
 
         // Idempotent, and durable: a second run is a no-op, a reopen sees it all.
         assert_eq!(migrate_legacy_chunks(&conn, &vdb).unwrap(), 0);
@@ -2419,17 +2705,40 @@ mod vector_migration_tests {
             text: "t".into(),
             token_estimate: 1,
         };
-        vdb.upsert_document("ready-with-vectors", None, vec![chunk("ready-with-vectors")], &[vec![1.0, 0.0]]).unwrap();
+        vdb.upsert_document(
+            "ready-with-vectors",
+            None,
+            vec![chunk("ready-with-vectors")],
+            &[vec![1.0, 0.0]],
+        )
+        .unwrap();
         // A crash between the segment write and the Ready commit.
-        vdb.upsert_document("not-ready", None, vec![chunk("not-ready")], &[vec![0.0, 1.0]]).unwrap();
+        vdb.upsert_document(
+            "not-ready",
+            None,
+            vec![chunk("not-ready")],
+            &[vec![0.0, 1.0]],
+        )
+        .unwrap();
 
         reconcile_vectors(&conn, &vdb, &[]).unwrap();
 
-        assert_eq!(vdb.documents(), vec!["ready-with-vectors".to_string()], "orphan segment dropped");
+        assert_eq!(
+            vdb.documents(),
+            vec!["ready-with-vectors".to_string()],
+            "orphan segment dropped"
+        );
         let status: String = conn
-            .query_row("SELECT index_status FROM documents WHERE id = 'ready-without'", [], |r| r.get(0))
+            .query_row(
+                "SELECT index_status FROM documents WHERE id = 'ready-without'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
-        assert_eq!(status, "Failed", "an indexed document without vectors is flagged for reindex");
+        assert_eq!(
+            status, "Failed",
+            "an indexed document without vectors is flagged for reindex"
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 }

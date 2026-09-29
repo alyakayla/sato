@@ -4,6 +4,7 @@
   const CASES = window.__MOCK_CASES ?? 300;
   const DOCS_PER_CASE = window.__MOCK_DOCS ?? 30;
   const MESSAGES = window.__MOCK_MESSAGES ?? 80;
+  const PEOPLE = window.__MOCK_PEOPLE ?? 2;
   const now = new Date().toISOString();
 
   const nodes = [];
@@ -17,7 +18,7 @@
       const did = `d${c}_${d}`;
       nodes.push({ id: `document:${did}`, nodeKey: `${ref}/document-${d}.pdf`, kind: 'document', label: `document-${d}.pdf`, parentId: `case:${cid}`, depth: 1, ordinal: nodes.length, status: 'Ready', detail: null, color: null, caseId: cid, documentId: did, sizeBytes: 120000, updatedAt: now, startsAt: null });
     }
-    for (let p = 0; p < 2; p++) {
+    for (let p = 0; p < PEOPLE; p++) {
       nodes.push({ id: `person:p${c}_${p}:${cid}`, nodeKey: `${ref}/person-${p}`, kind: 'person', label: `Person ${p}`, parentId: `case:${cid}`, depth: 1, ordinal: nodes.length, status: null, detail: 'Client', color: null, caseId: cid, documentId: null, sizeBytes: null, updatedAt: now, startsAt: null });
     }
   }

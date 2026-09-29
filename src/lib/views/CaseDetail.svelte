@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { deleteWithUndo } from '$lib/undoDelete';
   import { confirmDelete } from '$lib/confirm.svelte';
   import { openNodeMenu } from '$lib/artifactMenu';
   import { label, t } from '$lib/i18n/index.svelte';
@@ -20,6 +21,9 @@
   } from '$lib/stores.svelte';
   import StatusBadge from '$lib/components/StatusBadge.svelte';
   import PageHeader, { type PageProp } from '$lib/components/PageHeader.svelte';
+  import CaseGraph from '$lib/components/CaseGraph.svelte';
+  import LifeWaves from '$lib/components/LifeWaves.svelte';
+  import { connectionCount } from '$lib/caseGraph';
 
   let { caseId }: { caseId: string } = $props();
 
@@ -30,6 +34,8 @@
 
   const record = $derived(cases.value.find((c) => c.id === caseId) ?? detail);
   const children = $derived(treeNodes.value.filter((n) => n.caseId === caseId));
+  /** The case's own tree node: the root of its connection graph. */
+  const caseNode = $derived(children.find((n) => n.kind === 'case') ?? null);
   const category = $derived(
     categories.value.find((c) => c.id === (record?.categoryId ?? null)) ?? null,
   );
@@ -109,12 +115,14 @@
       message: t('confirm.case.body', { name: record.title }),
     });
     if (!go) return;
-    const ok = await guard(t('case.err.delete'), () => api.deleteCase(caseId));
-    if (ok !== null) {
-      notify('ok', t('case.deleted'));
-      await refreshAll();
-      openPane({ kind: 'grid' });
-    }
+    const id = caseId;
+    await deleteWithUndo({
+      key: `case:${id}`,
+      message: t('case.deleted'),
+      before: () => openPane({ kind: 'grid' }),
+      commit: async () => (await guard(t('case.err.delete'), () => api.deleteCase(id))) !== null,
+      after: () => refreshAll(),
+    });
   }
 
   function reveal(node: TreeNode): void {
@@ -210,6 +218,23 @@
       {/if}
     {/if}
 
+    <!-- The case's connections on an endless grid; Life when there are none. -->
+    <section class="connections" aria-label={t('graph.title')}>
+      <header>
+        <span class="eyebrow">{t('graph.title')}</span>
+        {#if caseNode && connectionCount(caseNode, children) > 0}
+          <span class="g-count faint">{t('graph.hint')}</span>
+        {/if}
+      </header>
+      <div class="graph-box">
+        {#if caseNode && connectionCount(caseNode, children) > 0}
+          <CaseGraph {caseNode} nodes={children} />
+        {:else}
+          <LifeWaves label={t('graph.empty')} />
+        {/if}
+      </div>
+    </section>
+
     <div class="groups">
       {#if groups.length === 0}
         <div class="empty" style="padding: 40px">
@@ -228,7 +253,7 @@
           </header>
           <div class="chips">
             {#each g.nodes as n (n.id)}
-              <button class="chip" onclick={() => reveal(n)} oncontextmenu={(e) => openNodeMenu(e, n)} title={n.nodeKey}>
+              <button class="chip" data-artifact={n.id} onclick={() => reveal(n)} oncontextmenu={(e) => openNodeMenu(e, n)} title={n.nodeKey}>
                 {#if g.kind === 'document'}<span class="c-i">▤</span>{/if}
                 {#if g.kind === 'person'}<span class="c-i">●</span>{/if}
                 {#if g.kind === 'sheet'}<span class="c-i">▦</span>{/if}
@@ -309,6 +334,19 @@
     color: var(--text-secondary);
     max-width: 70ch;
     white-space: pre-wrap;
+  }
+
+  .connections {
+    margin-top: 16px;
+  }
+  /* A small window onto the graph: bordered like the stats card above it,
+     since it sits in the layout rather than floating. */
+  .graph-box {
+    height: 240px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--surface);
+    overflow: hidden;
   }
 
   .groups {

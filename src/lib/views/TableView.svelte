@@ -357,6 +357,12 @@
     return node?.nodeKey ?? null;
   }
 
+  /** The row's artifact key, so a delete can pop it (lib/pop.ts). */
+  function rowKey(r: unknown): string {
+    const kind = { cases: 'case', documents: 'document', people: 'person', events: 'event', sheets: 'sheet' }[dataset];
+    return `${kind}:${(r as { id: string }).id}`;
+  }
+
   /** The context-menu target for a row of the current dataset. */
   function targetOfRow(r: unknown): ArtifactTarget {
     if (dataset === 'cases') return caseTarget(r as Case);
@@ -500,6 +506,7 @@
             {@const handle = handleOf(r)}
             <tr
               class="data-row"
+              data-artifact={rowKey(r)}
               class:even={(first + i) % 2 === 1}
               class:sel={selectedId === idOf(r)}
               tabindex="0"

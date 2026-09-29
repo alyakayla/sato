@@ -1,0 +1,28 @@
+#!/bin/sh
+# Rust gates before every commit that touches the backend: formatting and
+# clippy with warnings as errors. Installed by `bun install` (the `prepare`
+# script points git's core.hooksPath here). Skip once with `git commit --no-verify`.
+#
+# Both check the working tree, not just the staged changes.
+
+git diff --cached --name-only --diff-filter=ACMR | grep -q '^src-tauri/' || exit 0
+
+cd "$(git rev-parse --show-toplevel)/src-tauri" || exit 1
+
+echo "pre-commit: cargo fmt --check"
+if ! cargo fmt --check; then
+  echo "pre-commit: formatting is off. Run 'cargo fmt' in src-tauri and stage the result." >&2
+  exit 1
+fi
+
+# Tauri embeds the frontend at compile time, so clippy needs ../build.
+if [ ! -d ../build ]; then
+  echo "pre-commit: ../build is missing. Run 'bun run build' once, then commit again." >&2
+  exit 1
+fi
+
+echo "pre-commit: cargo clippy -D warnings"
+if ! cargo clippy --all-targets --locked -- -D warnings; then
+  echo "pre-commit: clippy found problems (above)." >&2
+  exit 1
+fi

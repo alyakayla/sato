@@ -56,7 +56,10 @@ pub fn extract(path: &Path, mime: &str) -> Result<Extracted> {
         "application/rtf" => extract_rtf(path),
         "text/html" => {
             let html = read_text(path)?;
-            Ok(Extracted { text: strip_html(&html), pages: None })
+            Ok(Extracted {
+                text: strip_html(&html),
+                pages: None,
+            })
         }
         "text/plain" | "text/csv" | "application/json" | "application/xml" | "text/markdown" => {
             let text = read_text(path)?;
@@ -79,8 +82,10 @@ fn read_text(path: &Path) -> Result<String> {
     if bytes.starts_with(&[0xFF, 0xFE]) {
         let body = &bytes[2..];
         let units: Vec<u16> = body
-            .chunks_exact(2)
-            .map(|p| u16::from_le_bytes([p[0], p[1]]))
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|&p| u16::from_le_bytes(p))
             .collect();
         return Ok(String::from_utf16_lossy(&units));
     }
@@ -88,8 +93,10 @@ fn read_text(path: &Path) -> Result<String> {
         // Big-endian UTF-16: swap each byte pair so we can reuse from_utf16.
         let body = &bytes[2..];
         let units: Vec<u16> = body
-            .chunks_exact(2)
-            .map(|p| u16::from_be_bytes([p[0], p[1]]))
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|&p| u16::from_be_bytes(p))
             .collect();
         return Ok(String::from_utf16_lossy(&units));
     }
@@ -112,7 +119,10 @@ fn extract_pdf(path: &Path) -> Result<Extracted> {
     } else {
         Vec::new()
     };
-    Ok(Extracted { text, pages: if pages.is_empty() { None } else { Some(pages) } })
+    Ok(Extracted {
+        text,
+        pages: if pages.is_empty() { None } else { Some(pages) },
+    })
 }
 
 fn extract_word(path: &Path, mime: &str) -> Result<Extracted> {
@@ -152,7 +162,10 @@ fn extract_word(path: &Path, mime: &str) -> Result<Extracted> {
         out.push_str(&docx_xml_to_text(&xml));
         out.push('\n');
     }
-    Ok(Extracted { text: out, pages: None })
+    Ok(Extracted {
+        text: out,
+        pages: None,
+    })
 }
 
 fn docx_xml_to_text(xml: &str) -> String {
@@ -182,11 +195,9 @@ fn docx_xml_to_text(xml: &str) -> String {
                     b"t" => in_text_run = false,
                     b"tab" => out.push('\t'),
                     b"br" | b"cr" => out.push('\n'),
-                    b"p" => {
-                        if para_depth == Some(depth) {
-                            para_depth = None;
-                            out.push('\n');
-                        }
+                    b"p" if para_depth == Some(depth) => {
+                        para_depth = None;
+                        out.push('\n');
                     }
                     _ => {}
                 }
@@ -269,13 +280,19 @@ fn extract_rtf(path: &Path) -> Result<Extracted> {
             other => out.push(other),
         }
     }
-    Ok(Extracted { text: out, pages: None })
+    Ok(Extracted {
+        text: out,
+        pages: None,
+    })
 }
 
 fn strip_html(html: &str) -> String {
     static SCRIPT: once_cell::sync::Lazy<regex::Regex> = once_cell::sync::Lazy::new(|| {
-        regex::Regex::new(r"(?is)<(script|style|head)[^>]*>.*?</\1>")
-            .expect("hard-coded script/style regex is valid")
+        // No backreferences in the regex crate, so each element closes itself.
+        regex::Regex::new(
+            r"(?is)<script[^>]*>.*?</script>|<style[^>]*>.*?</style>|<head[^>]*>.*?</head>",
+        )
+        .expect("hard-coded script/style regex is valid")
     });
     static TAG: once_cell::sync::Lazy<regex::Regex> = once_cell::sync::Lazy::new(|| {
         regex::Regex::new(r"(?s)<[^>]+>").expect("hard-coded tag regex is valid")
@@ -312,4 +329,16 @@ pub fn collapse_whitespace(input: &str) -> String {
         }
     }
     out.trim().to_string()
+}
+
+#[cfg(test)]
+mod html_tests {
+    use super::strip_html;
+
+    #[test]
+    fn strips_tags_and_the_contents_of_script_style_and_head() {
+        let html = "<html><head><title>T</title></head><body><style>p{}</style>\
+                    <p>Hello &amp; <b>bye</b></p><script>alert(1)</script></body></html>";
+        assert_eq!(strip_html(html), "Hello & bye");
+    }
 }
